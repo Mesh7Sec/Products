@@ -22,6 +22,7 @@ An Adaptor EC2 instance is started in the User's application VPC. This EC2 insta
 
 Traffic from the application workloads are copied to Mesh7 Adaptor EC2 instance through AWS VPC Traffic Mirroring service. This provides a non-intrusive, out-of-band, zero latency framework for Mesh7 to analyze workload traffic. Mesh7 Adaptor analyzes the traffic within the application VPC. It only communicates the metadata about the traffic to Mesh7 controller. So the application traffic never leaves the confines of application VPC, thus ensuring the intergrity of the application environment.
 
+Mesh7 secures application's S3 buckets by observability into S3 accesses from workloads in application VPC and from external sources.
 
 ## Pre-Install
 #### 1. Subscription to AWS Marketplace Mesh7 CASO BYOL offering
