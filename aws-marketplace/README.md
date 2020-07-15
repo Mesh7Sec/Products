@@ -42,13 +42,24 @@ ToDo: what info will the customer need to send to Mesh7
 
 #### Login to Mesh7 Controller
 
-###### a. Get IP of Mesh7 Adaptor EC2 instance
+##### a. Get IP of Mesh7 Adaptor EC2 instance
 ![stack7](documentation/images/stack7.png)
 
-###### a. Get domain name of Mesh7 Controller UI
+##### b. Get domain name of Mesh7 Controller UI
+
+NOTE: 
+Replace <your-pem> with PEM file provided to CloudFormation Stack create. eg: foo.pem
+Replace <mesh7-adaptor-ip> with IP of the Mesh7 Adaptor EC2 instance printed in the CloudFormation Stack output.
+
+```
+
+PEM=<your-pem>;MESH7_ADAPTOR_EC2_IP=<mesh7-adaptor-ip>; ssh -i $PEM ubuntu@$MESH7_ADAPTOR_EC2_IP kubectl get svc -n mesh7-system mesh7-nginx-ingress-controller -o jsonpath='{.status.loadBalancer.ingress[].hostname}'; echo
+
+```
+
 ![getdomain](documentation/images/get-controller-ui-domain.png)
 
-###### b. Login to Mesh7 Controller UI
+##### b. Login to Mesh7 Controller UI
 ![login](documentation/images/mesh7-ui.png)
 
 
