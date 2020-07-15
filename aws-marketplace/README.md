@@ -4,7 +4,7 @@
 - [Topology](#Topology)
 - [Prerequisites](#Prerequisites)
 - [Install](#Install)
-- [Post Install](#Post Install)
+- [Post-Install](#Post-Install)
 
 ## Topology
 ![Topology](documentation/images/topology.png)
@@ -26,13 +26,16 @@ ToDo: what info will the customer need to send to Mesh7
 #### 2. Create CloudFormation Stack
 
 ######   a. Navigate to Stacks under CloudFormation Pane, and click on ‘Create Stack’
-
+![stack1](documentation/images/stack1.png)
 ######   b. Upload controller-kma-install-cft.yaml template to create a CloudFormation Stack, and click ‘Next’.
-
+![stack2](documentation/images/stack2.png)
 ######   c. Give the stack a name, and enter the requested input parameters
+![stack3](documentation/images/stack3.png)
+![stack4](documentation/images/stack4.png)
+![stack5](documentation/images/stack5.png)
 
 ######   d. Agree to create an IAM user and resources, and Click ‘Create Stack’
-
+![stack6](documentation/images/stack6.png)
 ######   e. Get installation data after Stack completes successfully
 
 ## Post Install
