@@ -1,6 +1,5 @@
 # Mesh7 Cloud Application Security Observability (CASO) for AWS
 
-## Install Mesh7 CASO BYOL for AWS
 - [Topology](#Topology)
 - [Pre-Install](#Pre-Install)
 - [Install](#Install)
