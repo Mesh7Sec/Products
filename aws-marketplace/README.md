@@ -42,8 +42,13 @@ ToDo: what info will the customer need to send to Mesh7
 
 #### Login to Mesh7 Controller
 
-###### a. Login Mesh7 Adaptor EC2 instance and get domain name of Mesh7 Controller UI
+###### a. Get IP of Mesh7 Adaptor EC2 instance
+![stack7](documentation/images/stack7.png)
+
+###### a. Get domain name of Mesh7 Controller UI
+![getdomain](documentation/images/get-controller-ui-domain.png)
 
 ###### b. Login to Mesh7 Controller UI
+![login](documentation/images/mesh7-ui.png)
 
 
