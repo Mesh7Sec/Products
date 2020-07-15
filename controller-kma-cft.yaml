@@ -1,0 +1,849 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Mesh7 Controller Install'
+Metadata:
+  'AWS::CloudFormation::Interface':
+    ParameterGroups:
+    - Parameters:
+      - Owners
+      - ControllerRegion
+      - KMAVpcId
+      - KMASubnetId
+      - KMAKeyPairName
+      - DeploymentSize
+      - EnableCloudTrailLogging
+      - IsCloudTrailManagementEventsEnabled
+      - IsCloudTrailEnabledInAllRegions
+      - S3BucketsToTrail
+      - CreateMesh7IAMGroup
+      - CreateMesh7IAMUser
+      - ControllerPackageUrl
+      - Mesh7LicenseName
+      - Mesh7LicenseKey
+      - Email
+      - Domain
+      - DeploymentMode
+      
+
+Parameters:
+  Owners:
+      Description: 'Comma seperated list of IAM users who will have access to controller EKS cluster. If empty, will default to root of the current account'
+      Type: String
+
+  Email:
+      Description: 'Email Address to created Certificates for FQDN'
+      Type: String
+      ConstraintDescription: Please Provide valid Email address
+
+  Domain:
+       Description: 'Domain Name for setting up Certbot ( Refreshes certificate every 60 days). Please leave empty for Accessing using AWS ELB Address'
+       Type: String
+       ConstraintDescription: 'Please provide valid domain name. Please exclude live.com and amazonaws.com'
+       Default: ""
+
+  KMAVpcId:
+      Description: 'Please select the VPC where Mesh7 KMA should be launched - Predominantly Where Application VMs Were Present'
+      Type: AWS::EC2::VPC::Id
+      ConstraintDescription: VpcID must be an ID of an existing VPC
+
+  KMASubnetId:
+      Description: 'Please select the Subnet in which Mesh7 KMA should be launched - Need to be Public Subnet'
+      Type: AWS::EC2::Subnet::Id
+      ConstraintDescription: SubnetId must be an ID of a valid Subnet in the VPC
+
+  ControllerRegion:
+      Description: 'Please provide AWS region to create Mesh7 Controller EKS Cluster'
+      Type: 'String'
+  
+   
+  DeploymentSize:
+      Description: ' Please select the AWS Controller Size you want to Install'
+      Type: 'String'
+      Default: 'micro'
+      AllowedValues:
+      - 'micro'
+      - 'small'
+      - 'basic'
+      - 'medium'
+  
+  EnableCloudTrailLogging:
+    Description: 'Enable / Disable CloudTrail Logging'
+    Type: String
+    Default: 'true'
+    AllowedValues:
+    - 'true'
+    - 'false'
+
+  IsCloudTrailManagementEventsEnabled:
+    Description: 'Enable / Disable Cloud Trail Managements Events Logging'
+    Type: String
+    Default: 'true'
+    AllowedValues:
+    - 'true'
+    - 'false'
+
+  IsCloudTrailEnabledInAllRegions:
+    Description: 'Should CloudTrail logging be enabled across all regions for your AWS account'
+    Type: String
+    Default: 'true'
+    AllowedValues:
+    - 'true'
+    - 'false'
+
+  S3BucketsToTrail:
+    Description: 'Comma separated list of S3 Bucket ARNs to watched by CloudTrail. NOTE: Each bucket ARN should end with "/" suffix'
+    Type: CommaDelimitedList
+
+  CreateMesh7IAMGroup:
+    Description: 'Should create Mesh7 IAM group'
+    Type: String
+    Default: 'true'
+    AllowedValues:
+    - 'true'
+    - 'false'
+
+  CreateMesh7IAMUser:
+    Description: 'Should create Mesh7 IAM User'
+    Type: String
+    Default: 'true'
+    AllowedValues:
+    - 'true'
+    - 'false'
+
+  KMAKeyPairName:
+    Description: 'SSH key pair name to login to staging host'
+    Type: AWS::EC2::KeyPair::KeyName
+    ConstraintDescription: Must be the name of an existing EC2 KeyPair
+
+  ControllerPackageUrl:
+      Description: URL of controller Package
+      Type: String
+      ConstraintDescription: Please Provide the Public URL - where we can download Mesh7  controller package.
+      Default: ""
+
+  Mesh7LicenseName:
+      Description: Name of the Mesh7 install license
+      Type: String
+
+  Mesh7LicenseKey:
+      Description: Mesh7 install license key
+      Type: String
+      NoEcho: true
+
+  DeploymentMode:
+      Description: 'Mesh7 Client Cluster Deployment Mode'
+      Type: String
+      Default: 'HostAgent'
+      AllowedValues:
+      - 'HostAgent'
+      - 'VPCMirroring'
+
+Conditions:
+  VPCMirroringEnabled: !Equals [ !Ref DeploymentMode, VPCMirroring ]
+  CloudTrailLoggingEnabled: !Equals [ !Ref EnableCloudTrailLogging, true ]
+  Mesh7IAMGroupCreateEnabled: !Equals [ !Ref CreateMesh7IAMGroup, true ]
+  Mesh7LogPolicyEnabled:  !And
+  - !Equals [ !Ref EnableCloudTrailLogging, true ]
+  - !Equals [ !Ref CreateMesh7IAMGroup, true ]
+  Mesh7IAMUserCreateEnabled: !And
+  - !Equals [ !Ref CreateMesh7IAMGroup, true ]
+  - !Equals [ !Ref CreateMesh7IAMUser, true ]
+
+Mappings:
+  KMARegionMap:
+    us-east-2:
+      ami: ami-0e63971f254548bc4
+    us-east-1:
+      ami: ami-018f9341de29891d1
+    us-west-2:
+      ami: ami-0916d117849fca332
+
+  ZoneMap:
+    us-east-1:
+      zones: "\"us-east-1a\",\"us-east-1b\""
+    us-east-2:
+      zones: "\"us-east-2a\",\"us-east-2b\""
+    us-west-2:
+      zones: "\"us-west-2a\",\"us-west-2b\""
+
+
+Resources:
+  DeleteBucketExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: [lambda.amazonaws.com]
+            Action: ['sts:AssumeRole']
+      Path: /
+      Policies:
+        - PolicyName: !Join [ "" , !Split [ "-" , !Select [ 2, !Split [ "/", !Sub '${AWS::StackId}' ] ] ] ]
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: ['logs:*']
+                Resource: 'arn:aws:logs:*:*:*'
+              - Effect: Allow
+                Action: ['s3:*']
+                Resource: "*"
+
+  DeleteFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Code:
+        ZipFile: |
+                import json
+                import boto3
+                from botocore.vendored import requests
+                def handler(event, context):
+                      try:
+                        bucket = event['ResourceProperties']['BucketName']
+                        if event['RequestType'] == 'Delete':
+                            s3 = boto3.resource('s3')
+                            bucket = s3.Bucket(bucket)
+                            for obj in bucket.objects.filter():
+                              s3.Object(bucket.name, obj.key).delete()
+                        sendResponseCfn(event, context, "SUCCESS")
+                      except Exception as e:
+                        print(e)
+                        sendResponseCfn(event, context, "FAILED")
+                def sendResponseCfn(event, context, responseStatus):
+                      response_body = {'Status': responseStatus,
+                                      'Reason': 'Log stream name: ' + context.log_stream_name,
+                                      'PhysicalResourceId': context.log_stream_name,
+                                       'StackId': event['StackId'],
+                                      'RequestId': event['RequestId'],
+                                      'LogicalResourceId': event['LogicalResourceId'],
+                                      'Data': json.loads("{}")}
+                      requests.put(event['ResponseURL'], data=json.dumps(response_body))
+      Handler: index.handler
+      Runtime: python3.6
+      Role: !GetAtt DeleteBucketExecutionRole.Arn
+  DeleteBucket:
+   Type: "AWS::CloudFormation::CustomResource"
+   Condition: CloudTrailLoggingEnabled
+   Properties: 
+    ServiceToken:
+      !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${DeleteFunction}  
+    BucketName: !Ref TrailBucket
+    
+
+  TrailBucket:
+    Type: 'AWS::S3::Bucket'
+    DeletionPolicy: Delete
+    Condition: CloudTrailLoggingEnabled
+    Properties:
+      LifecycleConfiguration:
+        Rules:
+        - Id: DeleteContentAfter1Day
+          Status: Enabled
+          ExpirationInDays: 1
+  TrailBucketPolicy:
+    Type: 'AWS::S3::BucketPolicy'
+    Condition: CloudTrailLoggingEnabled
+    Properties:
+      Bucket: !Ref TrailBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Sid: AWSCloudTrailAclCheck
+          Effect: Allow
+          Principal:
+            Service: 'cloudtrail.amazonaws.com'
+          Action: 's3:GetBucketAcl'
+          Resource: !Sub 'arn:aws:s3:::${TrailBucket}'
+        - Sid: AWSCloudTrailWrite
+          Effect: Allow
+          Principal:
+            Service: 'cloudtrail.amazonaws.com'
+          Action: 's3:PutObject'
+          Resource: !Sub 'arn:aws:s3:::${TrailBucket}/AWSLogs/${AWS::AccountId}/*'
+          Condition:
+            StringEquals:
+              's3:x-amz-acl': 'bucket-owner-full-control'
+  TrailSQS:
+    Type: AWS::SQS::Queue
+    Condition: CloudTrailLoggingEnabled
+    Properties: {}
+  TrailSNSTopic:
+    Type: AWS::SNS::Topic
+    Condition: CloudTrailLoggingEnabled
+    Properties: {}
+  TrailSNStoSQSSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: CloudTrailLoggingEnabled
+    Properties:
+      Endpoint: !GetAtt [TrailSQS, Arn]
+      Protocol: sqs
+      RawMessageDelivery: true
+      TopicArn: !Ref TrailSNSTopic
+  TrailSNSTopicPolicy:
+    Type: 'AWS::SNS::TopicPolicy'
+    Condition: CloudTrailLoggingEnabled
+    Properties:
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Sid: AWSCloudTrailSNSDefaultPolicy
+          Effect: Allow
+          Principal:
+            AWS: '*'
+          Resource: !Ref TrailSNSTopic
+          Action:
+          - 'SNS:GetTopicAttributes'
+          - 'SNS:SetTopicAttributes'
+          - 'SNS:AddPermission'
+          - 'SNS:RemovePermission'
+          - 'SNS:DeleteTopic'
+          - 'SNS:Subscribe'
+          - 'SNS:ListSubscriptionsByTopic'
+          - 'SNS:Publish'
+          - 'SNS:Receive'
+          Condition:
+            StringEquals:
+              'AWS:SourceOwner': !Ref 'AWS::AccountId'
+        - Sid: AWSCloudTrailSNSPolicy
+          Effect: Allow
+          Principal:
+            Service: 'cloudtrail.amazonaws.com'
+          Resource: !Ref TrailSNSTopic
+          Action: 'sns:Publish'
+      Topics:
+      - !Ref TrailSNSTopic
+  TrailSNS2SQSPolicy:
+    Type: AWS::SQS::QueuePolicy
+    Condition: CloudTrailLoggingEnabled
+    Properties:
+      Queues: [!Ref 'TrailSQS']
+      PolicyDocument:
+        Version: '2012-10-17'
+        Id: PublicationPolicy
+        Statement:
+        - Sid: Allow-SNS-SendMessage
+          Effect: Allow
+          Principal:
+            AWS: '*'
+          Action: ['SQS:SendMessage']
+          Resource: !GetAtt [TrailSQS, Arn]
+          Condition:
+            ArnEquals:
+              aws:SourceArn: !Ref 'TrailSNSTopic'
+  Trail:
+    DependsOn:
+    - TrailBucketPolicy
+    - TrailSNSTopicPolicy
+    Type: 'AWS::CloudTrail::Trail'
+    Condition: CloudTrailLoggingEnabled
+    Properties:
+      IncludeGlobalServiceEvents: true
+      IsLogging: true
+      IsMultiRegionTrail: !Ref IsCloudTrailEnabledInAllRegions
+      EventSelectors:
+      - IncludeManagementEvents: !Ref IsCloudTrailManagementEventsEnabled
+        DataResources:
+        - Type: 'AWS::S3::Object'
+          Values: !Ref S3BucketsToTrail
+      S3BucketName: !Ref TrailBucket
+      EnableLogFileValidation: true
+      SnsTopicName: !GetAtt 'TrailSNSTopic.TopicName'
+
+  Mesh7LogGroup:
+    Type: AWS::IAM::Group
+    Condition: Mesh7IAMGroupCreateEnabled
+    Properties: {}
+
+  Mesh7LogPolicy:
+    Type: AWS::IAM::Policy
+    Condition: Mesh7LogPolicyEnabled
+    Properties:
+      PolicyName: !Join [ "" , !Split [ "-" , !Select [ 2, !Split [ "/", !Sub '${AWS::StackId}' ] ] ] ]
+      PolicyDocument:
+        Statement:
+        - Effect: Allow
+          Action:
+          - sqs:DeleteMessage
+          - sqs:ReceiveMessage
+          - s3:GetObject
+          Resource:
+            - !If
+              - CloudTrailLoggingEnabled
+              - !GetAtt [TrailSQS, Arn]
+              - !Ref AWS::NoValue
+            - !If
+              - CloudTrailLoggingEnabled
+              - !Join [ "", [ !GetAtt [TrailBucket, Arn],  '/*'] ]
+              - !Ref AWS::NoValue
+      Roles:
+      - !Ref Mesh7KMARole
+      Groups: [!Ref 'Mesh7LogGroup']
+
+  Mesh7LoggingUser:
+    Type: AWS::IAM::User
+    Condition: Mesh7IAMUserCreateEnabled
+    Properties:
+      Groups: [!Ref 'Mesh7LogGroup']
+      UserName : !Join [ "-", [ Mesh7LoggingUser, !Join [ "" , !Split [ "-" , !Select [ 2, !Split [ "/", !Sub '${AWS::StackId}' ] ] ] ] ] ]
+
+  Mesh7KMARole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - ec2.amazonaws.com
+            - eks.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/AmazonEKSServicePolicy
+      - arn:aws:iam::aws:policy/AmazonEKSClusterPolicy
+
+  Mesh7EKSPolicies:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Join ["-", [ Mesh7EKSPolicy, !Join [ "" , !Split [ "-" , !Select [ 2, !Split [ "/", !Sub '${AWS::StackId}' ] ] ] ] ] ]
+      PolicyDocument:
+        Statement:
+        - Effect: Allow
+          Action:
+          - iam:AddRoleToInstanceProfile
+          - iam:AttachRolePolicy
+          - iam:CreateInstanceProfile
+          - iam:CreateRole
+          - iam:CreateServiceLinkedRole
+          - iam:DeleteInstanceProfile
+          - iam:DeleteRole
+          - iam:DeleteRolePolicy
+          - iam:DeleteServiceLinkedRole
+          - iam:DetachRolePolicy
+          - iam:GetInstanceProfile
+          - iam:GetRole
+          - iam:GetRolePolicy
+          - iam:ListAttachedRolePolicies
+          - iam:ListInstanceProfiles
+          - iam:ListInstanceProfilesForRole
+          - iam:PassRole
+          - iam:PutRolePolicy
+          - iam:RemoveRoleFromInstanceProfile
+          - iam:CreateServiceLinkedRole
+          - iam:ListRoleTags
+          - iam:GetOpenIDConnectProvider
+          Resource:
+          - !Sub arn:aws:iam::${AWS::AccountId}:instance-profile/eksctl-*
+          - !Sub arn:aws:iam::${AWS::AccountId}:role/eksctl-*
+          - !Sub arn:aws:iam::${AWS::AccountId}:oidc-provider/oidc.eks.us-east-1.amazonaws.com/id/*
+          - !Sub arn:aws:iam::${AWS::AccountId}:role/aws-service-role/eks-nodegroup.amazonaws.com/AWSServiceRoleForAmazonEKSNodegroup
+          - !Sub arn:aws:iam::${AWS::AccountId}:role/Mesh7KMARole-*
+          - !Sub arn:aws:iam::${AWS::AccountId}:role/Mesh7EKSPolicy-*
+        - Effect: Allow
+          Action:
+          - ssm:GetParameter
+          - ssm:GetParameters
+          - ssm:DescribeParameters
+          Resource: '*'
+        - Effect: Allow
+          Action:
+          - ssm:GetParameter
+          Resource:
+          - arn:aws:ssm::::parameter/
+        - Effect: Allow
+          Action:
+          - ssm:GetParameter
+          - ssm:GetParameters
+          Resource:
+          - arn:aws:ssm::::parameter/*
+        - Effect: Allow
+          Action:
+          - cloudformation:*
+          Resource: '*'
+        - Effect: Allow
+          Action:
+          - eks:*
+          Resource: '*'
+        - Effect: Allow
+          Action:
+          - ec2:DeleteInternetGateway
+          Resource:
+          - arn:aws:ec2:*:*:internet-gateway/*
+        - Effect: Allow
+          Action:
+          - autoscaling:CreateLaunchConfiguration
+          - autoscaling:DeleteLaunchConfiguration
+          Resource:
+          - arn:aws:autoscaling:*:*:launchConfiguration:*:launchConfigurationName/*
+        - Effect: Allow
+          Action:
+          - autoscaling:UpdateAutoScalingGroup
+          - autoscaling:DeleteAutoScalingGroup
+          - autoscaling:CreateAutoScalingGroup
+          Resource:
+          - arn:aws:autoscaling:*:*:autoScalingGroup:*:autoScalingGroupName/*
+        - Effect: Allow
+          Action:
+          - autoscaling:DescribeAutoScalingGroups
+          - autoscaling:DescribeLaunchConfigurations
+          - autoscaling:DescribeScalingActivities
+          Resource: '*'
+        - Effect: Allow
+          Action:
+          - ec2:AuthorizeSecurityGroupIngress
+          - ec2:DeleteSubnet
+          - ec2:DeleteTags
+          - ec2:CreateNatGateway
+          - ec2:CreateVpc
+          - ec2:AttachInternetGateway
+          - ec2:DescribeVpcAttribute
+          - ec2:DeleteRouteTable
+          - ec2:AssociateRouteTable
+          - ec2:DescribeInternetGateways
+          - ec2:CreateRoute
+          - ec2:CreateInternetGateway
+          - ec2:RevokeSecurityGroupEgress
+          - ec2:CreateSecurityGroup
+          - ec2:ModifyVpcAttribute
+          - ec2:ModifySubnetAttribute
+          - ec2:DeleteInternetGateway
+          - ec2:DescribeRouteTables
+          - ec2:ReleaseAddress
+          - ec2:AuthorizeSecurityGroupEgress
+          - ec2:DescribeTags
+          - ec2:CreateTags
+          - ec2:DeleteRoute
+          - ec2:CreateRouteTable
+          - ec2:DetachInternetGateway
+          - ec2:DescribeNatGateways
+          - ec2:DisassociateRouteTable
+          - ec2:AllocateAddress
+          - ec2:DescribeSecurityGroups
+          - ec2:RevokeSecurityGroupIngress
+          - ec2:DeleteSecurityGroup
+          - ec2:DeleteNatGateway
+          - ec2:DeleteVpc
+          - ec2:CreateSubnet
+          - ec2:DescribeSubnets
+          - ec2:DescribeAvailabilityZones
+          - ec2:DescribeImages
+          - ec2:describeAddresses
+          - ec2:DescribeVpcs
+          - ec2:CreateLaunchTemplate
+          - ec2:DescribeLaunchTemplates
+          - ec2:DeleteLaunchTemplate
+          - ec2:DescribeLaunchTemplateVersions
+          - ec2:RunInstances"
+          Resource: '*'
+      Roles:
+      - !Ref Mesh7KMARole
+
+  Mesh7KMARolePolicies:
+    Type: AWS::IAM::Policy
+    Condition: Mesh7IAMGroupCreateEnabled
+    Properties:
+      PolicyName: !Join ["-" , [ Mesh7KMARolePolicies , !Join [ "" , !Split [ "-" , !Select [ 2, !Split [ "/", !Sub '${AWS::StackId}' ] ] ] ] ] ]
+      PolicyDocument:
+        Statement:
+        - Effect: Allow
+          Action:
+          - sts:AssumeRole
+          - iam:GetInstanceProfile
+          - ec2:DescribeTags
+          - ec2:CreateTags
+          - ec2:DescribeInstances
+          - ec2:DescribeNetworkInterfaces
+          - ec2:DescribeImages
+          - elasticloadbalancing:DescribeLoadBalancers
+          - ec2:DescribeNatGateways
+          - ssm:UpdateInstanceInformation
+          - sqs:GetQueueAttributes
+          Resource: '*'
+      Roles:
+      - !Ref Mesh7KMARole
+      Groups: [!Ref 'Mesh7LogGroup']
+
+  Mesh7KMARoleVPCMirroringPolicies:
+     Type: AWS::IAM::Policy
+     Condition: Mesh7IAMGroupCreateEnabled
+     Properties:
+       PolicyName: !Join ["-" , [ Mesh7KMARoleVPCMirroringPolicies, !Join [ "" , !Split [ "-" , !Select [ 2, !Split [ "/", !Sub '${AWS::StackId}' ] ] ] ] ] ]
+       PolicyDocument:
+         Statement:
+         - Effect: Allow
+           Action:
+           - ec2:CreateTrafficMirrorFilter
+           - ec2:DeleteTrafficMirrorFilter
+           - ec2:CreateTrafficMirrorTarget
+           - ec2:ModifyTrafficMirrorFilterRule
+           - ec2:ModifyTrafficMirrorFilterNetworkServices
+           - ec2:DeleteTrafficMirrorTarget
+           - ec2:DeleteTrafficMirrorSession
+           - ec2:CreateTrafficMirrorSession
+           - ec2:DescribeTrafficMirrorSessions
+           - ec2:ModifyTrafficMirrorSession
+           - ec2:DescribeTrafficMirrorFilters
+           - ec2:DescribeTrafficMirrorTargets
+           - ec2:CreateTrafficMirrorFilterRule
+           - ec2:DeleteTrafficMirrorFilterRule
+           Resource: '*'
+       Roles:
+       - !If
+         - VPCMirroringEnabled
+         - !Ref Mesh7KMARole
+         - !Ref AWS::NoValue
+       Groups: [!Ref 'Mesh7LogGroup']
+
+  Mesh7KMAInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Ref Mesh7KMARole
+      Roles:
+      - !Ref Mesh7KMARole
+
+  SecurityGroup:
+       Type: AWS::EC2::SecurityGroup
+       Properties:
+           VpcId: !Ref KMAVpcId
+           GroupDescription: "Security Group for KMA"
+           GroupName: !Join [ "-", [ "Mesh7KMASG", !Join [ "" , !Split [ "-" , !Select [ 2, !Split [ "/", !Sub '${AWS::StackId}' ] ] ] ] ] ]
+           SecurityGroupIngress:
+               - IpProtocol: tcp
+                 FromPort: 22
+                 ToPort: 22
+                 CidrIp: 0.0.0.0/0
+               - IpProtocol: tcp
+                 FromPort: 18080
+                 ToPort: 18080
+                 CidrIp: 0.0.0.0/0
+               - IpProtocol: tcp
+                 FromPort: 15004
+                 ToPort: 15004
+                 CidrIp: 0.0.0.0/0
+               - IpProtocol: tcp
+                 FromPort: 15010
+                 ToPort: 15010
+                 CidrIp: 0.0.0.0/0
+               - IpProtocol: tcp
+                 FromPort: 15011
+                 ToPort: 15011
+                 CidrIp: 0.0.0.0/0
+               - IpProtocol: udp
+                 FromPort: 4789
+                 ToPort: 4789
+                 CidrIp: 0.0.0.0/0
+
+  Mesh7AdapterInterface:
+      Type: AWS::EC2::NetworkInterface
+      Properties:
+        Description: NetworkInterface for KMA
+        GroupSet:    [!Ref SecurityGroup]
+        SubnetId: !Ref KMASubnetId
+        Tags:
+         - Key: MESH7-VPC-MIRRORING
+           Value: Target-NIC
+  Mesh7KMA:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !FindInMap [KMARegionMap, !Ref "AWS::Region", ami]
+      KeyName:
+        Ref: KMAKeyPairName
+      NetworkInterfaces:
+        - NetworkInterfaceId: !Ref Mesh7AdapterInterface
+          DeviceIndex: '0'
+      InstanceType: t2.xlarge
+      IamInstanceProfile: !Ref Mesh7KMAInstanceProfile
+      Tags:
+      - Key: Name
+        Value: !Join [ "-", [ "Mesh7KMA",  !Sub '${AWS::StackName}'] ]
+      - Key: MESH7-VPC-MIRRORING
+        Value: Target-VM
+      UserData:
+        Fn::Base64:
+          !Sub
+            - |
+              #!/bin/bash
+              set -o errtrace
+              exec > >(tee -a "/home/ubuntu/mesh7_install_aws.log") 2>&1
+              ### Creating the Input Variables file - Needed for scripts 
+              ### This file will be residing in /opt/kavach/scripts folder
+              ### Need for the file is that if the script stucks at anypoint - the user need not call the script with arguments
+              INSTALLATION_FOLDER=/opt/kavach
+              sudo mkdir -p $INSTALLATION_FOLDER
+              ### Installation Folder - /opt/kavach -where the controller package is extracted 
+              ### ControllerPackageUrl Feeds the Package url - if not specified the package url will be formed dynamically with version specified from 
+              ### Version parameter and DeployementSize chosen by User - Version is optional when the Package url is specified *** URL should be a public URL where the KMA Vm Can reach 
+              ### KMAVPC and KMASubnet Ids needs to be a public Network where user can reach via ssh and the KMA is the gateway for client EC2 vms in the AWS Cloud 
+              ### VPC and Subnet should be where the client AWS VMS are located.
+              ### KMARegion is the stack region and ControllerRegion can be any region (from Zonemap)  - KMA Region and ControllerRegion can also be similar.
+              ### EKS Cluster Creates New VPC - so CFT Intiation user should have rights to create VPC and Subnets .
+              ### Deployment Mode indicates the Mode in which the AWS KMA Needs to be deployed 
+                ### Options:
+                    ### VPCMirroring - simple Mode where the VPCMirroring objects are created to capture traffic flow between Mesh and Outside World and internal flows.
+                    ### HostAgent    - HostAgent will install sidecar in each Mesh Vms and watches the traffic flow ingress and egress of VMS.
+              ### GIT_REPO_URL - Git Repository URL ( Mutually exclustive with ControllerPackageURL)
+              ### Mesh7Package - Downloaded Package Name
+              ### EMAIL and Domain Names can be left as an empty string if you dont have domain name for certificate provisioning
+              ### Eventhough Certificate is provisioned using cert-manager certificate takes effect when the installaiton is success and domain entry is added manually at provider end. 
+              sudo echo '
+                    VERSION="__VERSION__"
+                    OWNERS="${Owners}"
+                    ACCOUNTID="${AWS::AccountId}"
+                    KMA_ROLE_ARN="${Mesh7KMARole.Arn}"
+                    MESH7_LICENSE_KEY="${Mesh7LicenseKey}"
+                    MESH7_USERNAME="${Mesh7LicenseName}"
+                    STACK="${AWS::StackName}"
+                    REGION="${ControllerRegion}"
+                    ZONES=${Zones}
+                    PACKAGE_URL="${url}"
+                    DOMAIN="${DOMAIN}"
+                    EMAIL="${EMAIL}"
+                    VPCID="${KMAVpcId}"
+                    KMAREGION="${AWS::Region}"
+                    DEPLOYMENT_TYPE="${DeploymentMode}"
+                    INSTANCE_PROFILE="${Mesh7KMAInstanceProfile}"
+                    MESH7_PACKAGE=package.tar.gz
+                    GIT_REPO_URL="__GIT_REPO_URL__"
+                    DEPLOYMENT_SIZE="${DeploymentSize}"
+                    INSTALLATION_FOLDER=/opt/kavach'   > $INSTALLATION_FOLDER/variables.sh
+                               
+               ### Mesh7 Package Download and Pre-requisites Fulfillment
+                   ### Mesh7 Package is downloaded into home folder of user (/home/ubuntu) and extracted into /opt/kavach folder
+                   ### Folder Structure
+                   ### --------------------------------------------------------------------------------------------------------------------------------
+                   ### /opt/kavach   
+                   ###   ├── 001-namespace.yaml --> creates the mesh7 namespace in controller cluster
+                   ###   ├── 002-controller-objects.yaml  ---> installs  all the controller components in the eks cluster created .
+                   ###   ├── 003-cert-manager.yaml        ----> Invoked only when domain and email are provided to create certificate.
+                   ##    ├── aws-cluster.json             ----> Json config about the eks cluster INFRA
+                   ###   |--scripts
+                   ###       ├── create_controller_eks.sh    ---> Creates the EKS Controller cluster
+                   ###       ├── get_secrets.sh              ---> Downloads the Secrets needed to login to Private GCR Repositories - Input for this will be Mesh7license name and key which Given by Mesh7Inc.
+                   ###       ├── kma_installation.sh         ---> Installs KMA Kubernetes Cluster on the KMA machine - root user - has client context (KMA Kubernetes) and Ubuntu user has access to Controller Cluster when login to KMA
+                   ###       ├── lib_functions.sh            ---> Library function needed for all shell scripts
+                   ###       |── start_installation.sh       ---> start_installation co-ordinates the overall install - logs the activites in /home/ubunut/mesh7_install_aws.log file - so when the installation stops due to error - just re-run the script again ./start_installation.sh from to complete the steps.
+                   ###       |-- variables.sh                ---> All Input variables will be sourced from here to each script.
+                   ### ----------------------------------------------------------------------------------------------------------------------------------    
+                   sudo echo  '
+                            #!/usr/bin/env bash
+                            set -x
+                            function print_help {
+                                  echo "Script usage: $0 -i <installation_folder>"
+                              }
+
+                            function ensure_variable() {
+                                local var_name=$1
+                                local var_value=$2
+                                if [[ -z $2 ]]
+                                then
+                                    echo "Variable $var_name not populated..."
+                                    exit 1
+                                fi
+                            }
+
+
+                              while getopts "h:i:" o; do
+                              case "${!o}" in
+                                  h)
+                                      print_help
+                                      exit 0
+                                      ;;
+                                  i)
+                                      INSTALLATION_FOLDER=${!OPTARG}
+                                      ;;
+                                  *)
+                                      print_help
+                                      exit 1
+                              esac
+                              done
+                            source $INSTALLATION_FOLDER/variables.sh
+                            ### Checking all variables are populated before running
+                            ensure_variable "MESH7_USERNAME" $MESH7_USERNAME
+                            ensure_variable "MESH7_LICENSE_KEY" $MESH7_LICENSE_KEY
+                            ensure_variable "STACK" $STACK
+                            ensure_variable "REGION" $REGION
+                            ensure_variable "KMAREGION" $KMAREGION
+                            ensure_variable "ZONES" $ZONES
+                            ensure_variable "VPCID" $VPCID
+                            ensure_variable "INSTALLATION_FOLDER" $INSTALLATION_FOLDER
+                            ensure_variable "MESH7_PACKAGE" $MESH7_PACKAGE
+                            ensure_variable "KMA_ROLE_ARN" $KMA_ROLE_ARN
+                            if [[ $PACKAGE_URL == "" ]];then
+                                  PACKAGE_URL=${!GIT_REPO_URL}/releases/download/${!VERSION}/${!DEPLOYMENT_SIZE}_aws_mesh7.tar.gz
+                                  sudo echo ${!PACKAGE_URL} >> $INSTALLATION_FOLDER/variables.sh
+                            fi
+                            
+                            retry=5
+                            attempt=0
+                            if [ ! -f "~/$MESH7_PACKAGE"  ];then
+                            ### Package download will be retried 5 times to eliminate any intermittent network connectivity
+                            while [ $attempt -lt $retry ]
+                            do
+                                response_code=`curl -LJ --insecure --write-out "%{http_code}\n" -H  --silent $PACKAGE_URL -S -f -o /home/ubuntu/$MESH7_PACKAGE`
+                                if [ $response_code -eq 200 ];then
+                                break
+                                fi
+                                ((attempt=$attempt+1))
+                                sleep 5
+                                echo "Retrying Controller Package download: try $attempt ..."
+                            done
+                            fi
+                            if [[  ! -f ~/$MESH7_PACKAGE  ]];then
+                                echo "Failed to download Mesh7 controller package $PACKAGE_URL."
+                                echo "Please verify if the license is valid and the package url is valid."
+                                echo "Exiting with failure."
+                                exit 1
+                            fi
+
+                            tar -xvf ~/$MESH7_PACKAGE -C $INSTALLATION_FOLDER
+                            if [ $? -ne 0 ];then
+                                echo "Downloaded Mesh7 controller pacakge could not extracted."
+                                echo "Exiting with failure."
+                                exit 1
+                            fi
+
+                            ' >  $INSTALLATION_FOLDER/mesh7_install_aws.sh
+                    ### Ensuring Correct permissions. 
+                    sudo chown -R ubuntu:ubuntu $INSTALLATION_FOLDER
+                    sudo chmod +x $INSTALLATION_FOLDER/mesh7_install_aws.sh  $INSTALLATION_FOLDER/variables.sh
+                    sudo -u ubuntu bash $INSTALLATION_FOLDER/mesh7_install_aws.sh -i $INSTALLATION_FOLDER
+                    if [ $? -eq 0 ];then
+                        source  $INSTALLATION_FOLDER/variables.sh
+                        sudo mv $INSTALLATION_FOLDER/variables.sh $INSTALLATION_FOLDER/scripts
+                        pushd $INSTALLATION_FOLDER/scripts
+                        sudo -u ubuntu bash start_installation.sh
+                        ### After installation is success we will remove the EKS Policy as we no longer need the permission to create the EKS Cluster from the instance.
+                        if [ $? -eq 0 ];then
+                           aws iam delete-role-policy --role-name ${Mesh7KMARole} --policy-name Mesh7EKSPolicy-${StackID}
+                        fi
+
+
+                    fi
+
+            - {
+               Zones:    !FindInMap [ ZoneMap,  !Ref "ControllerRegion",  zones],
+               url:      !Ref ControllerPackageUrl,
+               EMAIL:            !Ref Email,
+               DOMAIN:           !Ref Domain,
+               StackID:          !Join [ "" , !Split [ "-" , !Select [ 2, !Split [ "/", !Sub '${AWS::StackId}' ] ] ] ]
+              }
+
+Outputs:
+  Mesh7KMAPublicIpAddress:
+    Description: Mesh7 KMA PublicIP
+    Value:
+        !GetAtt [ Mesh7KMA, PublicIp ]
+  S3AccessCloudTrailBucketARN:
+    Description: 'S3 Bucket ARN in which CloudTrail logs are stored'
+    Value : !Join [ "", [ !Sub 'arn:aws:s3:::${TrailBucket}', '/*' ] ]
+    Condition: CloudTrailLoggingEnabled
+  CloudTrailLogsSqsARN:
+    Description: 'Cloud Trail SQS ARN.'
+    Value : !GetAtt [TrailSQS, Arn]
+    Condition: CloudTrailLoggingEnabled
+  CloudTrailLogsSqsUrl:
+    Description: 'Cloud Trail SQS URL.'
+    Value : !Ref TrailSQS
+    Condition: CloudTrailLoggingEnabled
