@@ -2,14 +2,14 @@
 
 ## Install Mesh7 CASO BYOL for AWS
 - [Topology](#Topology)
-- [Prerequisites](#Prerequisites)
+- [Pre-Install](#Pre-Install)
 - [Install](#Install)
 - [Post-Install](#Post-Install)
 
 ## Topology
 ![Topology](documentation/images/topology.png)
 
-## Prerequisites
+## Pre-Install
 #### 1. Subscription to AWS Marketplace Mesh7 CASO BYOL offering
 Please ensure that you have a valid subscription to Mesh7 CASO BYOL offering on AWS Marketplace.
 
@@ -41,4 +41,9 @@ ToDo: what info will the customer need to send to Mesh7
 ## Post Install
 
 #### Login to Mesh7 Controller
+
+###### a. Login Mesh7 Adaptor EC2 instance and get domain name of Mesh7 Controller UI
+
+###### b. Login to Mesh7 Controller UI
+
 
