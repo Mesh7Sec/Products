@@ -7,7 +7,21 @@
 - [Post-Install](#Post-Install)
 
 ## Topology
+
+**Mesh7 Cloud Application Security Observability (CASO) for AWS**
+
+
 ![Topology](documentation/images/topology.png)
+
+
+Mesh7 CASO provides real-time Layer7 observability to AWS. Mesh7 provides brings contextualized security observability for applications running on AWS.
+
+Mesh7 is installed seamlessly using AWS CloudFormation template. The template installs Mesh7 Contoller in a independent VPC, so that it is isolated from the application workloads both in terms of networking and resources. This provides a clear and non-instrusive plug-and-play scheme.
+
+An Adaptor EC2 instance is started in the User's application VPC. This EC2 instance acts as an adaptor between the application workloads and Mesh7 controller.
+
+Traffic from the application workloads are copied to Mesh7 Adaptor EC2 instance through AWS VPC Traffic Mirroring service. This provides a non-intrusive, out-of-band, zero latency framework for Mesh7 to analyze workload traffic. Mesh7 Adaptor analyzes the traffic within the application VPC. It only communicates the metadata about the traffic to Mesh7 controller. So the application traffic never leaves the confines of application VPC, thus ensuring the intergrity of the application environment.
+
 
 ## Pre-Install
 #### 1. Subscription to AWS Marketplace Mesh7 CASO BYOL offering
