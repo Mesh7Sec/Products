@@ -63,7 +63,7 @@ PEM=<your-pem>;MESH7_ADAPTOR_EC2_IP=<mesh7-adaptor-ip>; ssh -i $PEM ubuntu@$MESH
 
 ![getdomain](documentation/images/get-controller-ui-domain.png)
 
-##### b. Login to Mesh7 Controller UI using domain name from previous step
+##### c. Login to Mesh7 Controller UI using domain name from previous step
 ![login](documentation/images/mesh7-ui.png)
 
 
