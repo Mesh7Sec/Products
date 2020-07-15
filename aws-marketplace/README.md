@@ -4,6 +4,7 @@
 - [Topology](#Topology)
 - [Prerequisites](#Prerequisites)
 - [Install](#Install)
+- [Post Install](#Post Install)
 
 ## Topology
 ![Topology](documentation/images/topology.png)
@@ -31,4 +32,10 @@ ToDo: what info will the customer need to send to Mesh7
 ######   c. Give the stack a name, and enter the requested input parameters
 
 ######   d. Agree to create an IAM user and resources, and Click ‘Create Stack’
+
+######   e. Get installation data after Stack completes successfully
+
+## Post Install
+
+#### Login to Mesh7 Controller
 
