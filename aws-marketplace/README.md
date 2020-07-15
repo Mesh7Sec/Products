@@ -24,11 +24,11 @@ ToDo: what info will the customer need to send to Mesh7
 
 #### 2. Create CloudFormation Stack
 
-###### a. Navigate to Stacks under CloudFormation Pane, and click on ‘Create Stack’
+######   a. Navigate to Stacks under CloudFormation Pane, and click on ‘Create Stack’
 
-###### b. Upload controller-kma-install-cft.yaml template to create a CloudFormation Stack, and click ‘Next’.
+######   b. Upload controller-kma-install-cft.yaml template to create a CloudFormation Stack, and click ‘Next’.
 
-###### c. Give the stack a name, and enter the requested input parameters
+######   c. Give the stack a name, and enter the requested input parameters
 
-###### d. Agree to create an IAM user and resources, and Click ‘Create Stack’
+######   d. Agree to create an IAM user and resources, and Click ‘Create Stack’
 
