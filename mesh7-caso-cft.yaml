@@ -23,7 +23,6 @@ Metadata:
       - Email
       - Domain
       - DeploymentMode
-      - NLBEnabled
       
 
 Parameters:
@@ -33,7 +32,7 @@ Parameters:
       Default: ""
 
   Email:
-      Description: 'Email Address to created Certificates for FQDN and Will be used as notification channel for controller installation lifecycle.....'
+      Description: 'Email Address to created Certificates for FQDN'
       Type: String
       ConstraintDescription: Please Provide valid Email address
       Default: ""
@@ -140,7 +139,7 @@ Parameters:
       Description: Mesh7 install license key
       Type: String
       NoEcho: true
-  
+
   DeploymentMode:
       Description: 'Mesh7 Client Cluster Deployment Mode'
       Type: String
@@ -149,19 +148,8 @@ Parameters:
       - 'HostAgent'
       - 'VPCMirroring'
 
-  NLBEnabled:
-      Description: 'NLB is required when running VPCMirroring with more than 10 VMs'
-      Type: String
-      Default: 'true'
-      AllowedValues: 
-      - 'true'
-      - 'false'
-
 Conditions:
   VPCMirroringEnabled: !Equals [ !Ref DeploymentMode, VPCMirroring ]
-  NLBCreationEnabled:  !And
-  - !Equals [ !Ref DeploymentMode, VPCMirroring ]
-  - !Equals [ !Ref NLBEnabled , true ]
   CloudTrailLoggingEnabled: !Equals [ !Ref EnableCloudTrailLogging, true ]
   Mesh7IAMGroupCreateEnabled: !Equals [ !Ref CreateMesh7IAMGroup, true ]
   Mesh7LogPolicyEnabled:  !And
@@ -267,24 +255,14 @@ Resources:
     ServiceToken:
       !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${DeleteTrailBucketFunction}  
     BucketName: !Ref TrailBucket
-    
-  Mesh7NLBVPCMirroring:
-    Type: 'AWS::ElasticLoadBalancingV2::LoadBalancer'
-    Condition: NLBCreationEnabled
-    Properties:
-     Name:   !Join [ "" , !Split [ "-" , !Select [ 2, !Split [ "/", !Sub '${AWS::StackId}' ] ] ] ] 
-     Scheme: internal
-     Type: network
-     SubnetMappings:
-        - SubnetId: !Ref KMASubnetId
-
+   
   Mesh7NotificationTopic:
     Type: 'AWS::SNS::Topic'
     Condition: CreateNotificationChannel
     Properties:
      TopicName:  !Join [ "-", [ Mesh7Notification, !Join [ "" , !Split [ "-" , !Select [ 2, !Split [ "/", !Sub '${AWS::StackId}' ] ] ] ] ] ]
      DisplayName: "Mesh7 Installation Update"
-  
+
   Mesh7NotificationSubscription:
     Type: AWS::SNS::Subscription
     Condition: CreateNotificationChannel
@@ -292,6 +270,7 @@ Resources:
       Endpoint: !Ref Email
       Protocol: email
       TopicArn: !Ref Mesh7NotificationTopic
+
 
   Mesh7NotificationSNSTopicPolicy:
     Type: 'AWS::SNS::TopicPolicy'
@@ -324,15 +303,16 @@ Resources:
             Service: 'ec2.amazonaws.com'
             AWS: '*'
           Resource: !Ref Mesh7NotificationTopic
-          Action: 'sns:Publish'          
+          Action: 'sns:Publish'
         - Sid: SubscriptionPolicy
           Effect: Allow
           Principal:
             AWS: '*'
           Action: 'sns:Subscribe'
-          Resource: !Ref Mesh7NotificationTopic 
+          Resource: !Ref Mesh7NotificationTopic
       Topics:
       - !Ref Mesh7NotificationTopic
+    
 
   TrailBucket:
     Type: 'AWS::S3::Bucket'
@@ -810,7 +790,6 @@ Resources:
                     GIT_REPO_URL="__GIT_REPO_URL__"
                     DEPLOYMENT_SIZE="${DeploymentSize}"
                     INSTALLATION_FOLDER=/opt/kavach
-                    NLBARN="${NLBArn}"
                     TOPICARN="${Mesh7NotificationTopic}"'   > $INSTALLATION_FOLDER/variables.sh
                                
                ### Mesh7 Package Download and Pre-requisites Fulfillment
@@ -920,11 +899,10 @@ Resources:
                         sudo -u ubuntu bash start_installation.sh
                         ### After installation is success we will remove the EKS Policy as we no longer need the permission to create the EKS Cluster from the instance.
                         if [ $? -eq 0 ];then
-                           svc_url=`sudo -u ubuntu kubectl get services -n mesh7-system -l component=controller| grep -v NAME | awk '{print $4}'`
                            aws sns publish --topic-arn ${!TOPICARN} --message "Installation of Mesh7Adapter and Mesh7 Controller went successful - Please Visit the URL: $svc_url"  --subject "Mesh7 Installation"
                            aws iam delete-role-policy --role-name ${Mesh7KMARole} --policy-name Mesh7EKSPolicy-${StackID}
-                        else
-                          aws sns publish --topic-arn ${!TOPICARN} --message "Installation of Mesh7Adapter and Mesh7 Controller failed : Please re-run start_installation.sh from /opt/kavach/scripts" --subject "Mesh7-Installation"
+                        else 
+                           aws sns publish --topic-arn ${!TOPICARN} --message "Installation of Mesh7Adapter and Mesh7 Controller failed : Please re-run start_installation.sh from /opt/kavach/scripts" --subject "$
                         fi
                     else
                         aws sns publish --topic-arn ${!TOPICARN} --message "Installation of Mesh7Adapter and Mesh7 Controller failed : Package not available" --subject "Mesh7 Installation"
@@ -935,8 +913,7 @@ Resources:
                url:      !Ref ControllerPackageUrl,
                EMAIL:            !Ref Email,
                DOMAIN:           !Ref Domain,
-               StackID:          !Join [ "" , !Split [ "-" , !Select [ 2, !Split [ "/", !Sub '${AWS::StackId}' ] ] ] ],
-               NLBArn:           !If [ NLBCreationEnabled , !Ref Mesh7NLBVPCMirroring , "" ]
+               StackID:          !Join [ "" , !Split [ "-" , !Select [ 2, !Split [ "/", !Sub '${AWS::StackId}' ] ] ] ]
               }
 
 Outputs:
