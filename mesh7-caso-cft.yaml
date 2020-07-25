@@ -283,7 +283,7 @@ Resources:
     Condition: CreateNotificationChannel
     Properties:
      TopicName:  !Join [ "-", [ Mesh7Notification, !Join [ "" , !Split [ "-" , !Select [ 2, !Split [ "/", !Sub '${AWS::StackId}' ] ] ] ] ] ]
-     DisplayName: "Mesh7 Installation Update"
+     DisplayName: "Mesh7 CASO"
   
   Mesh7NotificationSubscription:
     Type: AWS::SNS::Subscription
@@ -921,7 +921,7 @@ Resources:
                         ### After installation is success we will remove the EKS Policy as we no longer need the permission to create the EKS Cluster from the instance.
                         if [ $? -eq 0 ];then
                            svc_url=`sudo -u ubuntu kubectl get services -n mesh7-system -l component=controller| grep -v NAME | awk '{print $4}'`
-                           aws sns publish --topic-arn ${!TOPICARN} --message "Installation of Mesh7Adapter and Mesh7 Controller went successful - Please Visit the URL: $svc_url"  --subject "Mesh7 Installation"
+                                aws sns publish --topic-arn ${!TOPICARN} --message "Mesh7 Cloud Application Security Observability successfully installed. Mesh7 CASO Dashboard: $svc_url"  --subject "Mesh7 CASO: Welcome"
                            aws iam delete-role-policy --role-name ${Mesh7KMARole} --policy-name Mesh7EKSPolicy-${StackID}
                         else
                           aws sns publish --topic-arn ${!TOPICARN} --message "Installation of Mesh7Adapter and Mesh7 Controller failed : Please re-run start_installation.sh from /opt/kavach/scripts" --subject "Mesh7-Installation"
