@@ -7,9 +7,9 @@ Metadata:
     - Parameters:
       - Owners
       - ControllerRegion
-      - KMAVpcId
-      - KMASubnetId
-      - KMAKeyPairName
+      - Mesh7AdaptorVpcId 
+      - Mesh7AdaptorSubnetId
+      - Mesh7AdaptorKeyPairName
       - DeploymentSize
       - EnableCloudTrailLogging
       - IsCloudTrailManagementEventsEnabled
@@ -44,12 +44,12 @@ Parameters:
        ConstraintDescription: 'Please provide valid domain name. Please exclude live.com and amazonaws.com'
        Default: ""
 
-  KMAVpcId:
+  Mesh7AdaptorVpcId:
       Description: 'Please select the VPC where Mesh7 Adapter should be launched - Predominantly Where Application VMs Were Present'
       Type: AWS::EC2::VPC::Id
       ConstraintDescription: VpcID must be an ID of an existing VPC
 
-  KMASubnetId:
+  Mesh7AdaptorSubnetId:
       Description: 'Please select the Subnet in which Mesh7 Adapter should be launched - Need to be Public Subnet'
       Type: AWS::EC2::Subnet::Id
       ConstraintDescription: SubnetId must be an ID of a valid Subnet in the VPC
@@ -121,7 +121,7 @@ Parameters:
     - 'true'
     - 'false'
 
-  KMAKeyPairName:
+  Mesh7AdaptorKeyPairName:
     Description: 'SSH key pair name to login to staging host'
     Type: AWS::EC2::KeyPair::KeyName
     ConstraintDescription: Must be the name of an existing EC2 KeyPair
@@ -144,7 +144,7 @@ Parameters:
   DeploymentMode:
       Description: 'Mesh7 Client Cluster Deployment Mode'
       Type: String
-      Default: 'HostAgent'
+      Default: 'VPCMirroring'
       AllowedValues:
       - 'HostAgent'
       - 'VPCMirroring'
@@ -276,7 +276,7 @@ Resources:
      Scheme: internal
      Type: network
      SubnetMappings:
-        - SubnetId: !Ref KMASubnetId
+        - SubnetId: !Ref Mesh7AdaptorSubnetId 
 
   Mesh7NotificationTopic:
     Type: 'AWS::SNS::Topic'
@@ -708,7 +708,7 @@ Resources:
   SecurityGroup:
        Type: AWS::EC2::SecurityGroup
        Properties:
-           VpcId: !Ref KMAVpcId
+           VpcId: !Ref Mesh7AdaptorVpcId 
            GroupDescription: "Security Group for KMA"
            GroupName: !Join [ "-", [ "Mesh7KMASG", !Join [ "" , !Split [ "-" , !Select [ 2, !Split [ "/", !Sub '${AWS::StackId}' ] ] ] ] ] ]
            SecurityGroupIngress:
@@ -742,7 +742,7 @@ Resources:
       Properties:
         Description: NetworkInterface for KMA
         GroupSet:    [!Ref SecurityGroup]
-        SubnetId: !Ref KMASubnetId
+        SubnetId: !Ref Mesh7AdaptorSubnetId 
         Tags:
          - Key: MESH7-VPC-MIRRORING
            Value: Target-NIC
@@ -751,7 +751,7 @@ Resources:
     Properties:
       ImageId: !FindInMap [KMARegionMap, !Ref "AWS::Region", ami]
       KeyName:
-        Ref: KMAKeyPairName
+        Ref: Mesh7AdaptorKeyPairName 
       NetworkInterfaces:
         - NetworkInterfaceId: !Ref Mesh7AdapterInterface
           DeviceIndex: '0'
@@ -802,7 +802,7 @@ Resources:
                     PACKAGE_URL="${url}"
                     DOMAIN="${DOMAIN}"
                     EMAIL="${EMAIL}"
-                    VPCID="${KMAVpcId}"
+                    VPCID="${Mesh7AdaptorVpcId}"
                     KMAREGION="${AWS::Region}"
                     DEPLOYMENT_TYPE="${DeploymentMode}"
                     INSTANCE_PROFILE="${Mesh7KMAInstanceProfile}"
