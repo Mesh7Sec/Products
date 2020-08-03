@@ -6,10 +6,11 @@ Metadata:
     ParameterGroups:
     - Parameters:
       - Owners
+      - InstallationMode
       - ControllerRegion
-      - KMAVpcId
-      - KMASubnetId
-      - KMAKeyPairName
+      - Mesh7AdaptorVpcId 
+      - Mesh7AdaptorSubnetId
+      - Mesh7AdaptorKeyPairName
       - DeploymentSize
       - EnableCloudTrailLogging
       - IsCloudTrailManagementEventsEnabled
@@ -23,16 +24,24 @@ Metadata:
       - Email
       - Domain
       - DeploymentMode
+      - NLBEnabled
       
-
 Parameters:
   Owners:
       Description: 'Comma seperated list of IAM users who will have access to controller EKS cluster. If empty, will default to root of the current account'
       Type: String
       Default: ""
 
+  InstallationMode:
+      Description: 'Installation mode in which the Stack needs to be installed - Controller only / Full stack'
+      Type: String
+      Default: "ControllerAndAdaptor"
+      AllowedValues:
+      - "ControllerAndAdaptor"
+      - "ControllerOnly"
+
   Email:
-      Description: 'Email Address to created Certificates for FQDN'
+      Description: 'Email Address to created Certificates for FQDN and Will be used as notification channel for controller installation lifecycle.....'
       Type: String
       ConstraintDescription: Please Provide valid Email address
       Default: ""
@@ -43,12 +52,12 @@ Parameters:
        ConstraintDescription: 'Please provide valid domain name. Please exclude live.com and amazonaws.com'
        Default: ""
 
-  KMAVpcId:
+  Mesh7AdaptorVpcId:
       Description: 'Please select the VPC where Mesh7 Adapter should be launched - Predominantly Where Application VMs Were Present'
       Type: AWS::EC2::VPC::Id
       ConstraintDescription: VpcID must be an ID of an existing VPC
 
-  KMASubnetId:
+  Mesh7AdaptorSubnetId:
       Description: 'Please select the Subnet in which Mesh7 Adapter should be launched - Need to be Public Subnet'
       Type: AWS::EC2::Subnet::Id
       ConstraintDescription: SubnetId must be an ID of a valid Subnet in the VPC
@@ -120,7 +129,7 @@ Parameters:
     - 'true'
     - 'false'
 
-  KMAKeyPairName:
+  Mesh7AdaptorKeyPairName:
     Description: 'SSH key pair name to login to staging host'
     Type: AWS::EC2::KeyPair::KeyName
     ConstraintDescription: Must be the name of an existing EC2 KeyPair
@@ -139,17 +148,28 @@ Parameters:
       Description: Mesh7 install license key
       Type: String
       NoEcho: true
-
+  
   DeploymentMode:
       Description: 'Mesh7 Client Cluster Deployment Mode'
       Type: String
-      Default: 'HostAgent'
+      Default: 'VPCMirroring'
       AllowedValues:
       - 'HostAgent'
       - 'VPCMirroring'
 
+  NLBEnabled:
+      Description: 'NLB is required when running VPCMirroring with more than 10 VMs'
+      Type: String
+      Default: 'true'
+      AllowedValues: 
+      - 'true'
+      - 'false'
+
 Conditions:
   VPCMirroringEnabled: !Equals [ !Ref DeploymentMode, VPCMirroring ]
+  NLBCreationEnabled:  !And
+  - !Equals [ !Ref DeploymentMode, VPCMirroring ]
+  - !Equals [ !Ref NLBEnabled , true ]
   CloudTrailLoggingEnabled: !Equals [ !Ref EnableCloudTrailLogging, true ]
   Mesh7IAMGroupCreateEnabled: !Equals [ !Ref CreateMesh7IAMGroup, true ]
   Mesh7LogPolicyEnabled:  !And
@@ -190,6 +210,127 @@ Mappings:
       zones: "\"ap-northeast-1a\",\"ap-northeast-1b\""  
    
 Resources:
+  DeleteVPCMirroringobjectsExecutionRole:
+    Type: AWS::IAM::Role
+    Condition: VPCMirroringEnabled
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: [lambda.amazonaws.com]
+            Action: ['sts:AssumeRole']
+      Path: /
+      Policies:
+        - PolicyName: !Join [ "" , !Split [ "-" , !Select [ 2, !Split [ "/", !Sub '${AWS::StackId}' ] ] ] ]
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: ['logs:*']
+                Resource: '*'
+              - Effect: Allow
+                Action: 
+                - ec2:DeleteTrafficMirrorFilter
+                - ec2:DeleteTrafficMirrorFilterRule
+                - ec2:DeleteTrafficMirrorSession
+                - ec2:DeleteTrafficMirrorTarget
+                - ec2:DescribeTrafficMirrorFilters
+                - ec2:DescribeTrafficMirrorFilterRule
+                - ec2:DescribeTrafficMirrorSessions
+                - ec2:DescribeTrafficMirrorTargets
+                Resource: "*"
+     
+  DeleteVPCMirroringobjectsFunction:
+    Type: AWS::Lambda::Function
+    Condition: VPCMirroringEnabled
+    Properties:
+      FunctionName: !Join [ "", [ M7Resource, !Select [ 1, !Split [ "-", !Sub '${Mesh7AdaptorVpcId}' ] ] ] ] 
+      Code:
+        ZipFile: |
+                import json
+                import boto3
+                import urllib3
+                http = urllib3.PoolManager()
+                def handler(event, context):
+                    try:
+                        MESH7_TAG='MESH7-VPC-MIRRORING'
+                        MESH7_VALUE='Mesh7-Resource'
+                        networkInterfacetype=event['ResourceProperties']['InstanceType']
+                        if networkInterfacetype == 'LoadBalancer':
+                          networkloadbalancerarn = event['ResourceProperties']['InterfaceURI']
+                        else:
+                          networkInterfaceId = event['ResourceProperties']['InterfaceURI']
+                        if event['RequestType'] == 'Delete':
+                            ec2 = boto3.client('ec2')
+                            filters=ec2.describe_traffic_mirror_filters()
+                            if len(filters) > 0: 
+                              for filter in filters['TrafficMirrorFilters']:
+                                  for i in range(0,len(filter['Tags'])):
+                                      if filter['Tags'][i]['Key'] == MESH7_TAG and filter['Tags'][i]['Value'] == MESH7_VALUE :
+                                        ec2.delete_traffic_mirror_filter(TrafficMirrorFilterId=session['TrafficMirrorFilterId'])
+
+                            sessions=ec2.describe_traffic_mirror_sessions()
+                            if len(sessions) > 0:
+                              for session in sessions['TrafficMirrorSessions']:
+                                  for i in range(0,len(session['Tags'])):
+                                      if session['Tags'][i]['Key'] == MESH7_TAG and session['Tags'][i]['Value'] == MESH7_VALUE :
+                                        ec2.delete_traffic_mirror_session(TrafficMirrorSessionId=session['TrafficMirrorSessionId'])
+                                  if networkInterfacetype == 'LoadBalancer':
+                                      if session['NetworkLoadBalancerArn'] == networkloadbalancerarn:
+                                        ec2.delete_traffic_mirror_session(TrafficMirrorSessionId=session['TrafficMirrorSessionId'])
+                                  else:
+                                      if session['NetworkInterfaceId'] == networkInterfaceId:
+                                        ec2.delete_traffic_mirror_session(TrafficMirrorSessionId=session['TrafficMirrorSessionId'])
+
+                            targets=ec2.describe_traffic_mirror_targets()
+                            if len(targets) > 0:
+                              for target in targets['TrafficMirrorTargets']:
+                                  for i in range(0,len(target['Tags'])):
+                                      if target['Tags'][i]['Key'] == MESH7_TAG and target['Tags'][i]['Value'] == MESH7_VALUE :
+                                        ec2.delete_traffic_mirror_target(TrafficMirrorSessionId=target['TrafficMirrorSessionId'])
+                                  if networkInterfacetype == 'LoadBalancer':
+                                      if target['NetworkLoadBalancerArn'] == networkloadbalancerarn:
+                                        ec2.delete_traffic_mirror_target(TrafficMirrorTargetId=target['TrafficMirrorTargetId'])
+                                  else:
+                                    if target['NetworkInterfaceId'] == networkInterfaceId:
+                                        ec2.delete_traffic_mirror_target(TrafficMirrorTargetId=target['TrafficMirrorTargetId'])
+                        sendResponseCfn(event, context, "SUCCESS")
+                    except Exception as e:
+                        sendResponseCfn(event, context, "FAILURE")
+                def sendResponseCfn(event, context, responseStatus):
+                    response_body = {'Status': responseStatus,
+                                      'Reason': 'Log stream name: ' + context.log_stream_name,
+                                      'PhysicalResourceId': context.log_stream_name,
+                                      'StackId': event['StackId'],
+                                      'RequestId': event['RequestId'],
+                                      'LogicalResourceId': event['LogicalResourceId'],
+                                      'Data': json.loads("{}")}
+                    http.request('PUT',event['ResponseURL'], body=json.dumps(response_body))     
+
+      Handler: index.handler
+      Runtime: python3.6
+      Timeout: 300
+      Role: !GetAtt DeleteVPCMirroringobjectsExecutionRole.Arn
+  
+  DeleteVPCMirrorirngResource:
+    Type: "AWS::CloudFormation::CustomResource"
+    Condition: VPCMirroringEnabled
+    Properties:
+      ServiceToken:
+        !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${DeleteVPCMirroringobjectsFunction}
+      InstanceType:
+      - !If
+        - NLBCreationEnabled
+        - "LoadBalancer"
+        - "Interface"
+      InterfaceURI:
+      - !If
+        - NLBCreationEnabled
+        - !Ref Mesh7NLBVPCMirroring
+        - !Ref Mesh7AdapterInterface
+ 
   DeleteTrailBucketExecutionRole:
     Type: AWS::IAM::Role
     Condition: CloudTrailLoggingEnabled
@@ -209,20 +350,22 @@ Resources:
             Statement:
               - Effect: Allow
                 Action: ['logs:*']
-                Resource: 'arn:aws:logs:*:*:*'
+                Resource: '*'
               - Effect: Allow
                 Action: ['s3:*']
                 Resource: "*"
-
+    
   DeleteTrailBucketFunction:
     Type: AWS::Lambda::Function
     Condition: CloudTrailLoggingEnabled
     Properties:
+      FunctionName: !Join [ "-", [ "DeleteTrail", !Join [ "" , !Split [ "-" , !Select [ 2, !Split [ "/", !Sub '${AWS::StackId}' ] ] ] ] ] ]
       Code:
         ZipFile: |
                 import json
                 import boto3
-                from botocore.vendored import requests
+                import urllib3
+                http = urllib3.PoolManager()
                 def handler(event, context):
                       try:
                         bucket = event['ResourceProperties']['BucketName']
@@ -243,7 +386,7 @@ Resources:
                                       'RequestId': event['RequestId'],
                                       'LogicalResourceId': event['LogicalResourceId'],
                                       'Data': json.loads("{}")}
-                      requests.put(event['ResponseURL'], data=json.dumps(response_body))
+                      http.request('PUT',event['ResponseURL'], body=json.dumps(response_body))
       Handler: index.handler
       Runtime: python3.6
       Timeout: 300
@@ -255,14 +398,46 @@ Resources:
     ServiceToken:
       !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${DeleteTrailBucketFunction}  
     BucketName: !Ref TrailBucket
-   
+    
+  Mesh7NLBVPCMirroring:
+    Type: 'AWS::ElasticLoadBalancingV2::LoadBalancer'
+    Condition: NLBCreationEnabled
+    Properties:
+     Name:   !Join [ "", [ M7Resource, !Select [ 1, !Split [ "-", !Sub '${Mesh7AdaptorVpcId}' ] ] ] ] 
+     Scheme: internal
+     Type: network
+     SubnetMappings:
+        - SubnetId: !Ref Mesh7AdaptorSubnetId 
+
+  Mesh7NLBVPCMirroringTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Condition: NLBCreationEnabled
+    Properties:
+     Name:   !Join [ "", [ M7ResourceTG, !Select [ 1, !Split [ "-", !Sub '${Mesh7AdaptorVpcId}' ] ] ] ]
+     VpcId: !Ref Mesh7AdaptorVpcId
+     Port: 4789
+     Protocol: TCP_UDP
+     HealthCheckProtocol: TCP
+     HealthCheckPort: '80'
+
+  Mesh7NBVPCMirroringListener:
+    Type: 'AWS::ElasticLoadBalancingV2::Listener'
+    Condition: NLBCreationEnabled
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref Mesh7NLBVPCMirroringTargetGroup
+      LoadBalancerArn: !Ref Mesh7NLBVPCMirroring
+      Port: 4789
+      Protocol: TCP_UDP
+
   Mesh7NotificationTopic:
     Type: 'AWS::SNS::Topic'
     Condition: CreateNotificationChannel
     Properties:
      TopicName:  !Join [ "-", [ Mesh7Notification, !Join [ "" , !Split [ "-" , !Select [ 2, !Split [ "/", !Sub '${AWS::StackId}' ] ] ] ] ] ]
-     DisplayName: "Mesh7 Installation Update"
-
+     DisplayName: "Mesh7 CASO"
+  
   Mesh7NotificationSubscription:
     Type: AWS::SNS::Subscription
     Condition: CreateNotificationChannel
@@ -270,7 +445,6 @@ Resources:
       Endpoint: !Ref Email
       Protocol: email
       TopicArn: !Ref Mesh7NotificationTopic
-
 
   Mesh7NotificationSNSTopicPolicy:
     Type: 'AWS::SNS::TopicPolicy'
@@ -303,16 +477,15 @@ Resources:
             Service: 'ec2.amazonaws.com'
             AWS: '*'
           Resource: !Ref Mesh7NotificationTopic
-          Action: 'sns:Publish'
+          Action: 'sns:Publish'          
         - Sid: SubscriptionPolicy
           Effect: Allow
           Principal:
             AWS: '*'
           Action: 'sns:Subscribe'
-          Resource: !Ref Mesh7NotificationTopic
+          Resource: !Ref Mesh7NotificationTopic 
       Topics:
       - !Ref Mesh7NotificationTopic
-    
 
   TrailBucket:
     Type: 'AWS::S3::Bucket'
@@ -642,6 +815,7 @@ Resources:
           - ec2:DescribeNatGateways
           - ssm:UpdateInstanceInformation
           - sqs:GetQueueAttributes
+          - iam:DeleteRolePolicy
           Resource: '*'
       Roles:
       - !Ref Mesh7KMARole
@@ -678,6 +852,37 @@ Resources:
          - !Ref AWS::NoValue
        Groups: [!Ref 'Mesh7LogGroup']
 
+  Mesh7VPCMirroringNLBPolicy:
+    Type: AWS::IAM::Policy
+    Condition: Mesh7IAMGroupCreateEnabled
+    Properties: 
+      PolicyName: !Join ["-" , [ Mesh7KMARoleVPCMirroringNLB, !Join [ "" , !Split [ "-" , !Select [ 2, !Split [ "/", !Sub '${AWS::StackId}' ] ] ] ] ] ]
+      PolicyDocument:
+         Statement:
+         - Effect: Allow
+           Action: 
+           - elasticloadbalancing:DescribeTargetGroupAttributes
+           - elasticloadbalancing:CreateTargetGroup
+           - elasticloadbalancing:DeleteListener
+           - elasticloadbalancing:DeleteTargetGroup
+           - elasticloadbalancing:DeregisterTargets
+           - elasticloadbalancing:DescribeListeners
+           - elasticloadbalancing:DescribeLoadBalancers
+           - elasticloadbalancing:DescribeRules
+           - elasticloadbalancing:DescribeTags
+           - elasticloadbalancing:DescribeTargetGroups
+           - elasticloadbalancing:DescribeTargetHealth
+           - elasticloadbalancing:ModifyTargetGroup
+           - elasticloadbalancing:RegisterTargets
+           - elasticloadbalancing:RemoveTags
+           Resource: '*'   
+      Roles:
+      - !If
+         - NLBCreationEnabled
+         - !Ref Mesh7KMARole
+         - !Ref AWS::NoValue
+      Groups: [!Ref 'Mesh7LogGroup']
+          
   Mesh7KMAInstanceProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
@@ -688,7 +893,7 @@ Resources:
   SecurityGroup:
        Type: AWS::EC2::SecurityGroup
        Properties:
-           VpcId: !Ref KMAVpcId
+           VpcId: !Ref Mesh7AdaptorVpcId 
            GroupDescription: "Security Group for KMA"
            GroupName: !Join [ "-", [ "Mesh7KMASG", !Join [ "" , !Split [ "-" , !Select [ 2, !Split [ "/", !Sub '${AWS::StackId}' ] ] ] ] ] ]
            SecurityGroupIngress:
@@ -716,22 +921,32 @@ Resources:
                  FromPort: 4789
                  ToPort: 4789
                  CidrIp: 0.0.0.0/0
+               - !If 
+                 - NLBCreationEnabled
+                 - IpProtocol: tcp
+                   FromPort: 80
+                   ToPort:   80
+                   CidrIp: 0.0.0.0/0
+                 - !Ref AWS::NoValue 
 
   Mesh7AdapterInterface:
       Type: AWS::EC2::NetworkInterface
       Properties:
         Description: NetworkInterface for KMA
         GroupSet:    [!Ref SecurityGroup]
-        SubnetId: !Ref KMASubnetId
+        SubnetId: !Ref Mesh7AdaptorSubnetId 
         Tags:
-         - Key: MESH7-VPC-MIRRORING
-           Value: Target-NIC
+         - !If
+            - VPCMirroringEnabled
+            - Key: MESH7-VPC-MIRRORING
+              Value: Target-NIC
+            - !Ref AWS::NoValue
   Mesh7KMA:
     Type: AWS::EC2::Instance
     Properties:
       ImageId: !FindInMap [KMARegionMap, !Ref "AWS::Region", ami]
       KeyName:
-        Ref: KMAKeyPairName
+        Ref: Mesh7AdaptorKeyPairName 
       NetworkInterfaces:
         - NetworkInterfaceId: !Ref Mesh7AdapterInterface
           DeviceIndex: '0'
@@ -740,8 +955,11 @@ Resources:
       Tags:
       - Key: Name
         Value: !Join [ "-", [ "Mesh7KMA",  !Sub '${AWS::StackName}'] ]
-      - Key: MESH7-VPC-MIRRORING
-        Value: Target-VM
+      - !If
+         - VPCMirroringEnabled
+         - Key: MESH7-VPC-MIRRORING
+           Value: Target-VM
+         - !Ref AWS::NoValue
       UserData:
         Fn::Base64:
           !Sub
@@ -771,6 +989,7 @@ Resources:
               ### Eventhough Certificate is provisioned using cert-manager certificate takes effect when the installaiton is success and domain entry is added manually at provider end. 
               sudo echo '
                     VERSION="__VERSION__"
+                    INSTALLATION_MODE="${InstallationMode}"
                     OWNERS="${Owners}"
                     ACCOUNTID="${AWS::AccountId}"
                     KMA_ROLE_ARN="${Mesh7KMARole.Arn}"
@@ -782,7 +1001,7 @@ Resources:
                     PACKAGE_URL="${url}"
                     DOMAIN="${DOMAIN}"
                     EMAIL="${EMAIL}"
-                    VPCID="${KMAVpcId}"
+                    VPCID="${Mesh7AdaptorVpcId}"
                     KMAREGION="${AWS::Region}"
                     DEPLOYMENT_TYPE="${DeploymentMode}"
                     INSTANCE_PROFILE="${Mesh7KMAInstanceProfile}"
@@ -790,7 +1009,8 @@ Resources:
                     GIT_REPO_URL="__GIT_REPO_URL__"
                     DEPLOYMENT_SIZE="${DeploymentSize}"
                     INSTALLATION_FOLDER=/opt/kavach
-                    TOPICARN="${Mesh7NotificationTopic}"'   > $INSTALLATION_FOLDER/variables.sh
+                    NLB_ARN="${NLBArn}"
+                    TOPICARN="${TopicArn}"'   > $INSTALLATION_FOLDER/variables.sh
                                
                ### Mesh7 Package Download and Pre-requisites Fulfillment
                    ### Mesh7 Package is downloaded into home folder of user (/home/ubuntu) and extracted into /opt/kavach folder
@@ -899,21 +1119,33 @@ Resources:
                         sudo -u ubuntu bash start_installation.sh
                         ### After installation is success we will remove the EKS Policy as we no longer need the permission to create the EKS Cluster from the instance.
                         if [ $? -eq 0 ];then
-                           aws sns publish --topic-arn ${!TOPICARN} --message "Installation of Mesh7Adapter and Mesh7 Controller went successful - Please Visit the URL: $svc_url"  --subject "Mesh7 Installation"
-                           aws iam delete-role-policy --role-name ${Mesh7KMARole} --policy-name Mesh7EKSPolicy-${StackID}
-                        else 
-                           aws sns publish --topic-arn ${!TOPICARN} --message "Installation of Mesh7Adapter and Mesh7 Controller failed : Please re-run start_installation.sh from /opt/kavach/scripts" --subject "$
+                           svc_url=`sudo -u ubuntu kubectl get services -n mesh7-system -l component=controller| grep -v NAME | awk '{print $4}'`
+                           message=(`echo Mesh7 Cloud Application Security Observability successfully installed. Mesh7 CASO Dashboard: $svc_url`)
+                           [[ $INSTALLATION_MODE == "ControllerOnly" ]] && message+=(`echo "Mesh7Controller Context: aws eks --region $CONTROLLER_REGION update-kubeconfig Mesh7Controller-$STACK"`) 
+                           [[ -n ${!TOPICARN} ]] && aws sns publish --topic-arn ${!TOPICARN} --message "${!message[@]}"  --subject "Mesh7 CASO: Welcome" || echo "Mesh7 Cloud Application Security Observability successfully installed. Mesh7 CASO Dashboard: $svc_url"
+                           aws iam delete-role-policy --role-name ${Mesh7KMARole} --policy-name Mesh7EKSPolicy-${StackID} 
+                           if [ -n "${!NLB_ARN}" ];then
+                              sudo apt update -y && sudo apt install nginx -y
+                           fi
+                           if [[ $INSTALLATION_MODE == "ControllerOnly" ]];then
+                             sudo poweroff
+                           fi
+                        else
+                          [[ -n ${!TOPICARN} ]] && aws sns publish --topic-arn ${!TOPICARN} --message "Installation of Mesh7Adapter and Mesh7 Controller failed : Please re-run start_installation.sh from /opt/kavach/scripts" --subject "Mesh7-Installation" || echo "Installation of Mesh7Adapter and Mesh7 Controller failed : Please re-run ./start_installation.sh from /opt/kavach"
                         fi
                     else
-                        aws sns publish --topic-arn ${!TOPICARN} --message "Installation of Mesh7Adapter and Mesh7 Controller failed : Package not available" --subject "Mesh7 Installation"
+                        [[ -n ${!TOPICARN} ]] && aws sns publish --topic-arn ${!TOPICARN} --message "Installation of Mesh7Adapter and Mesh7 Controller failed : Package not available" --subject "Mesh7 Installation" || echo "Installation of Mesh7Adaptor failed: Package url not valid"
                     fi
+                    
 
             - {
                Zones:    !FindInMap [ ZoneMap,  !Ref "ControllerRegion",  zones],
                url:      !Ref ControllerPackageUrl,
                EMAIL:            !Ref Email,
                DOMAIN:           !Ref Domain,
-               StackID:          !Join [ "" , !Split [ "-" , !Select [ 2, !Split [ "/", !Sub '${AWS::StackId}' ] ] ] ]
+               StackID:          !Join [ "" , !Split [ "-" , !Select [ 2, !Split [ "/", !Sub '${AWS::StackId}' ] ] ] ],
+               NLBArn:           !If [ NLBCreationEnabled , !Ref Mesh7NLBVPCMirroring , "" ],
+               TopicArn:         !If [ CreateNotificationChannel , !Ref Mesh7NotificationTopic , "" ]
               }
 
 Outputs:
@@ -933,3 +1165,6 @@ Outputs:
     Description: 'Cloud Trail SQS URL.'
     Value : !Ref TrailSQS
     Condition: CloudTrailLoggingEnabled
+  Mesh7ControllerEKSClusterConfig:
+    Description: 'Controller Cluster context - run from one of the owners provided in stack'  
+    Value:  !Sub "aws eks --region ${ControllerRegion} update-kubeconfig --name Mesh7Controller-${AWS::StackName}"
