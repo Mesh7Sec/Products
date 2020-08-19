@@ -228,7 +228,34 @@ Resources:
             Version: 2012-10-17
             Statement:
               - Effect: Allow
-                Action: ['logs:*']
+                Action: 
+                - logs:CreateLogDelivery
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:DeleteLogDelivery
+                - logs:DeleteLogGroup
+                - logs:DeleteLogStream
+                - logs:DeleteMetricFilter
+                - logs:DeleteResourcePolicy
+                - logs:DeleteRetentionPolicy
+                - logs:DescribeLogGroups
+                - logs:DescribeLogStreams
+                - logs:DescribeMetricFilters
+                - logs:DescribeResourcePolicies
+                - logs:GetLogDelivery
+                - logs:GetLogEvents
+                - logs:GetLogGroupFields
+                - logs:GetLogRecord
+                - logs:ListLogDeliveries
+                - logs:ListTagsLogGroup
+                - logs:PutDestination
+                - logs:PutDestinationPolicy
+                - logs:PutLogEvents
+                - logs:PutMetricFilter
+                - logs:PutResourcePolicy
+                - logs:PutRetentionPolicy
+                - logs:UntagLogGroup
+                - logs:UpdateLogDelivery
                 Resource: '*'
               - Effect: Allow
                 Action: 
@@ -349,10 +376,52 @@ Resources:
             Version: 2012-10-17
             Statement:
               - Effect: Allow
-                Action: ['logs:*']
+                Action:           
+                - logs:CreateLogDelivery
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:DeleteLogDelivery
+                - logs:DeleteLogGroup
+                - logs:DeleteLogStream
+                - logs:DeleteMetricFilter
+                - logs:DeleteResourcePolicy
+                - logs:DeleteRetentionPolicy
+                - logs:DescribeLogGroups
+                - logs:DescribeLogStreams
+                - logs:DescribeMetricFilters
+                - logs:DescribeResourcePolicies
+                - logs:GetLogDelivery
+                - logs:GetLogEvents
+                - logs:GetLogGroupFields
+                - logs:GetLogRecord
+                - logs:ListLogDeliveries
+                - logs:ListTagsLogGroup
+                - logs:PutDestination
+                - logs:PutDestinationPolicy
+                - logs:PutLogEvents
+                - logs:PutMetricFilter
+                - logs:PutResourcePolicy
+                - logs:PutRetentionPolicy
+                - logs:UntagLogGroup
+                - logs:UpdateLogDelivery
                 Resource: '*'
               - Effect: Allow
-                Action: ['s3:*']
+                Action: 
+                - s3:DeleteBucket
+                - s3:DeleteObject
+                - s3:DeleteObjectTagging
+                - s3:DeleteObjectVersion
+                - s3:DeleteObjectVersionTagging
+                - s3:GetBucketAcl
+                - s3:GetBucketCORS
+                - s3:GetBucketObjectLockConfiguration
+                - s3:GetObject
+                - s3:GetObjectAcl
+                - s3:HeadBucket
+                - s3:ListAllMyBuckets
+                - s3:ListBucket
+                - s3:ListBucketMultipartUploads
+                - s3:ListBucketVersions
                 Resource: "*"
     
   DeleteTrailBucketFunction:
@@ -1120,9 +1189,10 @@ Resources:
                         ### After installation is success we will remove the EKS Policy as we no longer need the permission to create the EKS Cluster from the instance.
                         if [ $? -eq 0 ];then
                            svc_url=`sudo -u ubuntu kubectl get services -n mesh7-system -l component=controller| grep -v NAME | awk '{print $4}'`
-                           message=(`echo Mesh7 Cloud Application Security Observability successfully installed. Mesh7 CASO Dashboard: $svc_url`)
-                           [[ $INSTALLATION_MODE == "ControllerOnly" ]] && message+=(`echo "Mesh7Controller Context: aws eks --region $CONTROLLER_REGION update-kubeconfig Mesh7Controller-$STACK"`) 
-                           [[ -n ${!TOPICARN} ]] && aws sns publish --topic-arn ${!TOPICARN} --message "${!message[@]}"  --subject "Mesh7 CASO: Welcome" || echo "Mesh7 Cloud Application Security Observability successfully installed. Mesh7 CASO Dashboard: $svc_url"
+                           message=(`echo "Mesh7 Cloud Application Security Observability successfully installed. Mesh7 CASO Dashboard: $svc_url"`)
+                           [[ $INSTALLATION_MODE == "ControllerOnly" ]] && message+=(`echo "-----Mesh7Controller Context: aws eks --region $CONTROLLER_REGION update-kubeconfig Mesh7Controller-$STACK"`) 
+                           message=`printf "%s " "${!message[@]}"`
+                           [[ -n ${!TOPICARN} ]] && aws sns publish --topic-arn ${!TOPICARN} --message "${!message}"  --subject "Mesh7 CASO: Welcome" || echo "Mesh7 Cloud Application Security Observability successfully installed. Mesh7 CASO Dashboard: $svc_url"
                            aws iam delete-role-policy --role-name ${Mesh7KMARole} --policy-name Mesh7EKSPolicy-${StackID} 
                            if [ -n "${!NLB_ARN}" ];then
                               sudo apt update -y && sudo apt install nginx -y
