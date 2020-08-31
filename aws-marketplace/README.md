@@ -1,4 +1,4 @@
-# Mesh7 Cloud Application Security Observability (CASO) for AWS
+# Mesh7 Cloud-Native Application Behavior Security for AWS
 
 - [Topology](#Topology)
 - [Pre-Install](#Pre-Install)
@@ -7,13 +7,13 @@
 
 ## Topology
 
-**Mesh7 Cloud Application Security Observability (CASO) for AWS**
+**Mesh7 Cloud-Native Application Behavior Security for AWS**
 
 
 ![Topology](documentation/images/topology.png)
 
 
-Mesh7 CASO provides real-time Layer7 observability to AWS. Mesh7 provides brings contextualized security observability for applications running on AWS.
+Mesh7 provides real-time Layer7 observability to AWS. Mesh7 provides brings contextualized security observability for applications running on AWS.
 
 Mesh7 is installed seamlessly using AWS CloudFormation template. The template installs Mesh7 Contoller in a independent VPC, so that it is isolated from the application workloads both in terms of networking and resources. This provides a clear and non-instrusive plug-and-play scheme.
 
@@ -24,8 +24,8 @@ Traffic from the application workloads are copied to Mesh7 Adaptor EC2 instance 
 Mesh7 secures application's S3 buckets by observability into S3 accesses from workloads in application VPC and from external sources.
 
 ## Pre-Install
-#### 1. Subscription to AWS Marketplace Mesh7 CASO BYOL offering
-Please ensure that you have a valid subscription to Mesh7 CASO BYOL offering on AWS Marketplace.
+#### 1. Subscription to AWS Marketplace Mesh7 Cloud-Native Application Behavior Security BYOL offering
+Please ensure that you have a valid subscription to Mesh7 BYOL offering on AWS Marketplace.
 
 #### 2. Reach out Mesh7 support to get Mesh7 License
 Please send an email to Mesh7 Support at support@mesh7.com to obtain Mesh7 License.
@@ -35,7 +35,7 @@ ToDo: what info will the customer need to send to Mesh7
 
 ## Install
 
-#### 1. Download Mesh7 CASO CloudFormation template
+#### 1. Download Mesh7 CloudFormation template
 
 #### 2. Create CloudFormation Stack
 
