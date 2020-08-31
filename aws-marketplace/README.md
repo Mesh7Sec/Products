@@ -28,10 +28,7 @@ Mesh7 secures application's S3 buckets by observability into S3 accesses from wo
 Please ensure that you have a valid subscription to Mesh7 BYOL offering on AWS Marketplace.
 
 #### 2. Reach out Mesh7 support to get Mesh7 License
-Please send an email to Mesh7 Support at support@mesh7.com to obtain Mesh7 License.
-
-ToDo: what info will the customer need to send to Mesh7
-      Which email should be used.
+Please send an email to Mesh7 Support at aws-support@mesh7.com to obtain Mesh7 License.
 
 ## Install
 
