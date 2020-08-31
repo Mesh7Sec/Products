@@ -32,7 +32,7 @@ Please send an email to Mesh7 Support at aws-support@mesh7.com to obtain Mesh7 L
 
 ## Install
 
-#### 1. Download Mesh7 CloudFormation template
+#### 1. Download Mesh7 CloudFormation template:  ![CFT](https://github.com/Mesh7Sec/Products/releases)
 
 #### 2. Create CloudFormation Stack
 
