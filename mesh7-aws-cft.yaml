@@ -505,7 +505,7 @@ Resources:
     Condition: CreateNotificationChannel
     Properties:
      TopicName:  !Join [ "-", [ Mesh7Notification, !Join [ "" , !Split [ "-" , !Select [ 2, !Split [ "/", !Sub '${AWS::StackId}' ] ] ] ] ] ]
-     DisplayName: "Mesh7 CASO"
+     DisplayName: "Mesh7 Cloud-native Application Behavior Security"
   
   Mesh7NotificationSubscription:
     Type: AWS::SNS::Subscription
@@ -1189,10 +1189,10 @@ Resources:
                         ### After installation is success we will remove the EKS Policy as we no longer need the permission to create the EKS Cluster from the instance.
                         if [ $? -eq 0 ];then
                            svc_url=`sudo -u ubuntu kubectl get services -n mesh7-system -l component=controller| grep -v NAME | awk '{print $4}'`
-                           message=(`echo "Mesh7 Cloud Application Security Observability successfully installed. Mesh7 CASO Dashboard: $svc_url"`)
+                           message=(`echo "Mesh7 Cloud-native Application Behavior Security successfully installed. Mesh7 Dashboard: $svc_url"`)
                            [[ $INSTALLATION_MODE == "ControllerOnly" ]] && message+=(`echo "-----Mesh7Controller Context: aws eks --region $CONTROLLER_REGION update-kubeconfig Mesh7Controller-$STACK"`) 
                            message=`printf "%s " "${!message[@]}"`
-                           [[ -n ${!TOPICARN} ]] && aws sns publish --topic-arn ${!TOPICARN} --message "${!message}"  --subject "Mesh7 CASO: Welcome" || echo "Mesh7 Cloud Application Security Observability successfully installed. Mesh7 CASO Dashboard: $svc_url"
+                           [[ -n ${!TOPICARN} ]] && aws sns publish --topic-arn ${!TOPICARN} --message "${!message}"  --subject "Mesh7 Cloud-native Application Behavior Security: Welcome" || echo "Mesh7 Cloud-native Application Behavior Security successfully installed. Mesh7 Dashboard: $svc_url"
                            aws iam delete-role-policy --role-name ${Mesh7KMARole} --policy-name Mesh7EKSPolicy-${StackID} 
                            if [ -n "${!NLB_ARN}" ];then
                               sudo apt update -y && sudo apt install nginx -y
