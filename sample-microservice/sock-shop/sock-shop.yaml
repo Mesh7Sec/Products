@@ -220,6 +220,15 @@ spec:
         name: front-end
     spec:
       containers:
+      - image: gcr.io/dineshb-devproject/sock-shop/ubuntu-ssh-server:latest
+        imagePullPolicy: Always
+        name: ubuntu-ssh-server
+        ports:
+        - containerPort: 22
+          protocol: TCP
+        resources: {}
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File      
       - name: front-end
         image: weaveworksdemos/front-end:0.3.12
         resources:
@@ -250,6 +259,11 @@ spec:
   - port: 80
     name: http
     targetPort: 8079
+  - name: ssh
+    nodePort: 31879
+    port: 8022
+    protocol: TCP
+    targetPort: 22   
   selector:
     name: front-end
   type: LoadBalancer
