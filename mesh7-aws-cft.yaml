@@ -8,7 +8,7 @@ Metadata:
       - Owners
       - InstallationMode
       - ControllerRegion
-      - Mesh7AdaptorVpcId 
+      - Mesh7AdaptorVpcId
       - Mesh7AdaptorSubnetId
       - Mesh7AdaptorKeyPairName
       - DeploymentSize
@@ -25,7 +25,7 @@ Metadata:
       - Domain
       - DeploymentMode
       - NLBEnabled
-      
+
 Parameters:
   Owners:
       Description: 'Comma seperated list of IAM users who will have access to controller EKS cluster. If empty, will default to root of the current account'
@@ -73,7 +73,7 @@ Parameters:
       - 'ca-central-1'
       - 'ap-south-1'
       - 'ap-northeast-1'
-  
+
   DeploymentSize:
       Description: ' Please select the AWS Controller Size you want to Install'
       Type: 'String'
@@ -83,7 +83,7 @@ Parameters:
       - 'small'
       - 'basic'
       - 'medium'
-  
+
   EnableCloudTrailLogging:
     Description: 'Enable / Disable CloudTrail Logging'
     Type: String
@@ -109,9 +109,9 @@ Parameters:
     - 'false'
 
   S3BucketsToTrail:
-    Description: 'Comma separated list of S3 Bucket ARNs to watched by CloudTrail. NOTE: Each bucket ARN should end with "/" suffix'
+    Description: 'S3 ARNs should be a comma separated entries, each terminated by /'
     Type: CommaDelimitedList
-    ConstraintDescription: 'Please Input like arn:aws::s3::bucket1/,arn:aws::s3::bucket2/' 
+    ConstraintDescription: 'Please Input like arn:aws::s3::bucket1/,arn:aws::s3::bucket2/'
 
   CreateMesh7IAMGroup:
     Description: 'Should create Mesh7 IAM group'
@@ -148,7 +148,7 @@ Parameters:
       Description: Mesh7 install license key
       Type: String
       NoEcho: true
-  
+
   DeploymentMode:
       Description: 'Mesh7 Client Cluster Deployment Mode'
       Type: String
@@ -161,7 +161,7 @@ Parameters:
       Description: 'NLB is required when running VPCMirroring with more than 10 VMs'
       Type: String
       Default: 'true'
-      AllowedValues: 
+      AllowedValues:
       - 'true'
       - 'false'
 
@@ -170,11 +170,15 @@ Conditions:
   NLBCreationEnabled:  !And
   - !Equals [ !Ref DeploymentMode, VPCMirroring ]
   - !Equals [ !Ref NLBEnabled , true ]
-  CloudTrailLoggingEnabled: !Equals [ !Ref EnableCloudTrailLogging, true ]
+  - !Equals [ !Ref InstallationMode, ControllerAndAdaptor ]
+  CloudTrailLoggingEnabled: !And
+  - !Equals [ !Ref EnableCloudTrailLogging, true ]
+  - !Equals [ !Ref InstallationMode, ControllerAndAdaptor ]
   Mesh7IAMGroupCreateEnabled: !Equals [ !Ref CreateMesh7IAMGroup, true ]
   Mesh7LogPolicyEnabled:  !And
   - !Equals [ !Ref EnableCloudTrailLogging, true ]
   - !Equals [ !Ref CreateMesh7IAMGroup, true ]
+  - !Equals [ !Ref InstallationMode, ControllerAndAdaptor ]
   Mesh7IAMUserCreateEnabled: !And
   - !Equals [ !Ref CreateMesh7IAMGroup, true ]
   - !Equals [ !Ref CreateMesh7IAMUser, true ]
@@ -207,10 +211,12 @@ Mappings:
     ap-south-1:
       zones: "\"ap-south-1a\",\"ap-south-1b\""
     ap-northeast-1:
-      zones: "\"ap-northeast-1a\",\"ap-northeast-1b\""  
-   
+      zones: "\"ap-northeast-1a\",\"ap-northeast-1b\""
+
 Resources:
   DeleteVPCMirroringobjectsExecutionRole:
+    DependsOn:
+    - PreInstallValidationResource
     Type: AWS::IAM::Role
     Condition: VPCMirroringEnabled
     Properties:
@@ -222,43 +228,19 @@ Resources:
               Service: [lambda.amazonaws.com]
             Action: ['sts:AssumeRole']
       Path: /
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
       Policies:
         - PolicyName: !Join [ "" , !Split [ "-" , !Select [ 2, !Split [ "/", !Sub '${AWS::StackId}' ] ] ] ]
           PolicyDocument:
             Version: 2012-10-17
             Statement:
               - Effect: Allow
-                Action: 
-                - logs:CreateLogDelivery
-                - logs:CreateLogGroup
-                - logs:CreateLogStream
-                - logs:DeleteLogDelivery
-                - logs:DeleteLogGroup
-                - logs:DeleteLogStream
-                - logs:DeleteMetricFilter
-                - logs:DeleteResourcePolicy
-                - logs:DeleteRetentionPolicy
-                - logs:DescribeLogGroups
-                - logs:DescribeLogStreams
-                - logs:DescribeMetricFilters
-                - logs:DescribeResourcePolicies
-                - logs:GetLogDelivery
-                - logs:GetLogEvents
-                - logs:GetLogGroupFields
-                - logs:GetLogRecord
-                - logs:ListLogDeliveries
-                - logs:ListTagsLogGroup
-                - logs:PutDestination
-                - logs:PutDestinationPolicy
-                - logs:PutLogEvents
-                - logs:PutMetricFilter
-                - logs:PutResourcePolicy
-                - logs:PutRetentionPolicy
-                - logs:UntagLogGroup
-                - logs:UpdateLogDelivery
+                Action:
+                - logs:*
                 Resource: '*'
               - Effect: Allow
-                Action: 
+                Action:
                 - ec2:DeleteTrafficMirrorFilter
                 - ec2:DeleteTrafficMirrorFilterRule
                 - ec2:DeleteTrafficMirrorSession
@@ -268,12 +250,14 @@ Resources:
                 - ec2:DescribeTrafficMirrorSessions
                 - ec2:DescribeTrafficMirrorTargets
                 Resource: "*"
-     
+
   DeleteVPCMirroringobjectsFunction:
+    DependsOn:
+    - PreInstallValidationResource
     Type: AWS::Lambda::Function
     Condition: VPCMirroringEnabled
     Properties:
-      FunctionName: !Join [ "", [ M7Resource, !Select [ 1, !Split [ "-", !Sub '${Mesh7AdaptorVpcId}' ] ] ] ] 
+      FunctionName: !Join [ "", [ M7Resource, !Select [ 1, !Split [ "-", !Sub '${Mesh7AdaptorVpcId}' ] ] ] ]
       Code:
         ZipFile: |
                 import json
@@ -292,7 +276,7 @@ Resources:
                         if event['RequestType'] == 'Delete':
                             ec2 = boto3.client('ec2')
                             filters=ec2.describe_traffic_mirror_filters()
-                            if len(filters) > 0: 
+                            if len(filters) > 0:
                               for filter in filters['TrafficMirrorFilters']:
                                   for i in range(0,len(filter['Tags'])):
                                       if filter['Tags'][i]['Key'] == MESH7_TAG and filter['Tags'][i]['Value'] == MESH7_VALUE :
@@ -316,7 +300,7 @@ Resources:
                               for target in targets['TrafficMirrorTargets']:
                                   for i in range(0,len(target['Tags'])):
                                       if target['Tags'][i]['Key'] == MESH7_TAG and target['Tags'][i]['Value'] == MESH7_VALUE :
-                                        ec2.delete_traffic_mirror_target(TrafficMirrorSessionId=target['TrafficMirrorSessionId'])
+                                        ec2.delete_traffic_mirror_target(TrafficMirrorTargetId=target['TrafficMirrorTargetId'])
                                   if networkInterfacetype == 'LoadBalancer':
                                       if target['NetworkLoadBalancerArn'] == networkloadbalancerarn:
                                         ec2.delete_traffic_mirror_target(TrafficMirrorTargetId=target['TrafficMirrorTargetId'])
@@ -325,7 +309,7 @@ Resources:
                                         ec2.delete_traffic_mirror_target(TrafficMirrorTargetId=target['TrafficMirrorTargetId'])
                         sendResponseCfn(event, context, "SUCCESS")
                     except Exception as e:
-                        sendResponseCfn(event, context, "FAILURE")
+                        sendResponseCfn(event, context, "FAILED")
                 def sendResponseCfn(event, context, responseStatus):
                     response_body = {'Status': responseStatus,
                                       'Reason': 'Log stream name: ' + context.log_stream_name,
@@ -334,14 +318,16 @@ Resources:
                                       'RequestId': event['RequestId'],
                                       'LogicalResourceId': event['LogicalResourceId'],
                                       'Data': json.loads("{}")}
-                    http.request('PUT',event['ResponseURL'], body=json.dumps(response_body))     
+                    http.request('PUT',event['ResponseURL'], body=json.dumps(response_body))
 
       Handler: index.handler
       Runtime: python3.6
       Timeout: 300
       Role: !GetAtt DeleteVPCMirroringobjectsExecutionRole.Arn
-  
+
   DeleteVPCMirrorirngResource:
+    DependsOn:
+    - PreInstallValidationResource
     Type: "AWS::CloudFormation::CustomResource"
     Condition: VPCMirroringEnabled
     Properties:
@@ -357,8 +343,10 @@ Resources:
         - NLBCreationEnabled
         - !Ref Mesh7NLBVPCMirroring
         - !Ref Mesh7AdapterInterface
- 
+
   DeleteTrailBucketExecutionRole:
+    DependsOn:
+    - PreInstallValidationResource
     Type: AWS::IAM::Role
     Condition: CloudTrailLoggingEnabled
     Properties:
@@ -370,43 +358,19 @@ Resources:
               Service: [lambda.amazonaws.com]
             Action: ['sts:AssumeRole']
       Path: /
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
       Policies:
         - PolicyName: !Join [ "" , !Split [ "-" , !Select [ 2, !Split [ "/", !Sub '${AWS::StackId}' ] ] ] ]
           PolicyDocument:
             Version: 2012-10-17
             Statement:
               - Effect: Allow
-                Action:           
-                - logs:CreateLogDelivery
-                - logs:CreateLogGroup
-                - logs:CreateLogStream
-                - logs:DeleteLogDelivery
-                - logs:DeleteLogGroup
-                - logs:DeleteLogStream
-                - logs:DeleteMetricFilter
-                - logs:DeleteResourcePolicy
-                - logs:DeleteRetentionPolicy
-                - logs:DescribeLogGroups
-                - logs:DescribeLogStreams
-                - logs:DescribeMetricFilters
-                - logs:DescribeResourcePolicies
-                - logs:GetLogDelivery
-                - logs:GetLogEvents
-                - logs:GetLogGroupFields
-                - logs:GetLogRecord
-                - logs:ListLogDeliveries
-                - logs:ListTagsLogGroup
-                - logs:PutDestination
-                - logs:PutDestinationPolicy
-                - logs:PutLogEvents
-                - logs:PutMetricFilter
-                - logs:PutResourcePolicy
-                - logs:PutRetentionPolicy
-                - logs:UntagLogGroup
-                - logs:UpdateLogDelivery
+                Action:
+                - logs:*
                 Resource: '*'
               - Effect: Allow
-                Action: 
+                Action:
                 - s3:DeleteBucket
                 - s3:DeleteObject
                 - s3:DeleteObjectTagging
@@ -423,8 +387,10 @@ Resources:
                 - s3:ListBucketMultipartUploads
                 - s3:ListBucketVersions
                 Resource: "*"
-    
+
   DeleteTrailBucketFunction:
+    DependsOn:
+    - PreInstallValidationResource
     Type: AWS::Lambda::Function
     Condition: CloudTrailLoggingEnabled
     Properties:
@@ -440,9 +406,9 @@ Resources:
                         bucket = event['ResourceProperties']['BucketName']
                         if event['RequestType'] == 'Delete':
                             s3 = boto3.resource('s3')
-                            bucket = s3.Bucket(bucket)
-                            for obj in bucket.objects.filter():
-                              s3.Object(bucket.name, obj.key).delete()
+                            s3_bucket = s3.Bucket(bucket)
+                            s3_bucket.objects.all().delete()
+                            s3_bucket.delete()
                         sendResponseCfn(event, context, "SUCCESS")
                       except Exception as e:
                         print(e)
@@ -461,28 +427,342 @@ Resources:
       Timeout: 300
       Role: !GetAtt DeleteTrailBucketExecutionRole.Arn
   DeleteTrailBucket:
+   DependsOn:
+    - PreInstallValidationResource
    Type: "AWS::CloudFormation::CustomResource"
    Condition: CloudTrailLoggingEnabled
-   Properties: 
+   Properties:
     ServiceToken:
-      !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${DeleteTrailBucketFunction}  
+      !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${DeleteTrailBucketFunction}
     BucketName: !Ref TrailBucket
-    
+
+  PreInstallValidationExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: [lambda.amazonaws.com]
+            Action: ['sts:AssumeRole']
+      Path: /
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  PreInstallValidationFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Code:
+        ZipFile: |
+                 import json
+                 import boto3
+                 import urllib3
+                 http = urllib3.PoolManager()
+                 def handler(event, context):
+                     packageurl = event['ResourceProperties']['PackageURL']
+                     licensekey = event['ResourceProperties']['LicenseKey']
+                     licensename = event['ResourceProperties']['LicenseName']
+                     if event['RequestType'] == 'Create':
+                        try:
+                          if packageurl != '':
+                             res = http.request('GET',packageurl)
+                             if res.status != 200:
+                                raise Exception("Package url not accessible")
+                          if licensekey != '':
+                             url = "https://www.googleapis.com/storage/v1/b/mesh7-controller-install/o/{}%2fimage_pull_secret.json?alt=media".format(licensename)
+                             header = {"Authorization":"Bearer {}".format(licensekey)}
+                             if http.request('GET',url=url,headers=header).status != 200:
+                                raise Exception("License Key or license name not valid")
+                          sendResponseCfn(event, context, "SUCCESS", "URL and License key is valid")
+                        except Exception as e:
+                          sendResponseCfn(event, context, "FAILED" , str(e))
+                     else:
+                        sendResponseCfn(event, context , "SUCCESS", "Skipped the Operation")
+                 def sendResponseCfn(event, context, responseStatus, message):
+                     response_body =   {'Status': responseStatus,
+                                       'Reason': message,
+                                       'PhysicalResourceId': context.log_stream_name,
+                                       'StackId': event['StackId'],
+                                       'RequestId': event['RequestId'],
+                                       'LogicalResourceId': event['LogicalResourceId'],
+                                       'Data': json.loads("{}")}
+                     http.request('PUT',event['ResponseURL'], body=json.dumps(response_body))
+
+      Handler: index.handler
+      Runtime: python3.6
+      Timeout: 300
+      Role: !GetAtt PreInstallValidationExecutionRole.Arn
+
+  PreInstallValidationResource:
+    Type: "AWS::CloudFormation::CustomResource"
+    Properties:
+      ServiceToken:
+        !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${PreInstallValidationFunction}
+      PackageURL: !Ref ControllerPackageUrl
+      LicenseKey: !Ref Mesh7LicenseKey
+      LicenseName: !Ref Mesh7LicenseName
+  DeleteVPCExecutionRole:
+    DependsOn:
+    - PreInstallValidationResource
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: [lambda.amazonaws.com]
+            Action: ['sts:AssumeRole']
+      Path: /
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/AWSLambdaExecute
+      Policies:
+        - PolicyName: !Join [ "-", [ "DeleteVPC", !Join [ "" , !Split [ "-" , !Select [ 2, !Split [ "/", !Sub '${AWS::StackId}' ] ] ] ] ] ]
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                - ec2:Delete*
+                - ec2:Describe*
+                - ec2:Detach*
+                - ec2:Disassociate*
+                - ec2:Remove*
+                - ec2:Replace*
+                - ec2:Revoke*
+                - elasticloadbalancing:DeleteLoadBalancer
+                - elasticloadbalancing:DeleteLoadBalancerListeners
+                - elasticloadbalancing:DeleteLoadBalancerPolicy
+                - elasticloadbalancing:DescribeLoadBalancerAttributes
+                - elasticloadbalancing:DescribeLoadBalancers
+                - elasticloadbalancing:DetachLoadBalancerFromSubnets
+                Resource: "*"
+
+  DeleteVPCFunction:
+    DependsOn:
+    - PreInstallValidationResource
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Join [ "-", [ "DeleteVPCfn", !Join [ "" , !Split [ "-" , !Select [ 2, !Split [ "/", !Sub '${AWS::StackId}' ] ] ] ] ] ]
+      Code:
+        ZipFile: |
+              import boto3
+              import json
+              def handler(event, context):
+                  vpc_id = event['vpc_id']
+                  region = event['region']
+                  status = vpc_cleanup(vpc_id, region)
+                  print(status)
+                  return {"Status": status}
+              def vpc_cleanup(vpcid,region):
+                                  try:
+                                      ec2_client = boto3.client('ec2',region_name=region)
+                                      ec2 = boto3.resource('ec2',region_name=region)
+                                      elb = boto3.client('elb',region_name=region)
+                                      ec2client = ec2.meta.client
+                                      vpc = ec2.Vpc(vpcid)
+                                      ngws = ec2_client.describe_nat_gateways(Filter=[{'Name': 'vpc-id','Values': [vpcid] }])
+                                      [ ec2_client.delete_nat_gateway(NatGatewayId=ngw['NatGatewayId']) for ngw in ngws['NatGateways'] ]
+                                      flag=0
+                                      for ngw in ngws['NatGateways']:
+                                          while flag == 0:
+                                            for i in ec2_client.describe_nat_gateways(Filter=[{'Name': 'vpc-id','Values': [vpcid] }])['NatGateways']:
+                                                if i['State'] == 'deleted':
+                                                    flag = 1
+                                      for i in elb.describe_load_balancers()['LoadBalancerDescriptions']:
+                                          if i['VPCId'] == vpcid:
+                                              elb.delete_load_balancer(LoadBalancerName=i['LoadBalancerName'])
+                                          try:
+                                              while len(elb.describe_load_balancers(LoadBalancerNames=[i['LoadBalancerName']])) > 0:
+                                                  pass
+                                          except Exception as e:
+                                              pass
+                                      for interface in vpc.network_interfaces.all():
+                                          try:
+                                              interface.delete()
+                                          except Exception as e:
+                                              print(e)
+                                      try:
+                                          while len(list(vpc.network_interfaces.all())) > 0:
+                                              pass
+                                      except Exception as e:
+                                          pass
+                                      for gw in vpc.internet_gateways.all():
+                                          vpc.detach_internet_gateway(InternetGatewayId=gw.id)
+                                          gw.delete()
+                                      [ rta.delete() for rt in vpc.route_tables.all() for rta in rt.associations if not rta.main ]
+                                      [ instance.terminate() for subnet in vpc.subnets.all() for instance in subnet.instances.all() ]
+                                      [ ec2client.delete_vpc_endpoints(VpcEndpointIds=[ep['VpcEndpointId']]) for ep in ec2client.describe_vpc_endpoints(Filters=[{'Name': 'vpc-id','Values': [vpcid]}])['VpcEndpoints'] ]
+                                      for sg in vpc.security_groups.all():
+                                          try:
+                                              if sg.group_name != 'default':
+                                                  sg.revoke_ingress(IpPermissions=sg.ip_permissions)
+                                                  sg.delete()
+                                          except Exception as e:
+                                              pass
+                                      [ ec2.VpcPeeringConnection(vpcpeer['VpcPeeringConnectionId']).delete() for vpcpeer in ec2client.describe_vpc_peering_connections(Filters=[{'Name': 'requester-vpc-info.vpc-id','Values': [vpcid]}])['VpcPeeringConnections'] ]
+                                      [ netacl.delete() for netacl in vpc.network_acls.all() if not netacl.is_default ]
+                                      return 0
+                                  except Exception as e:
+                                      print(e)
+                                      return 1
+      Handler: index.handler
+      Runtime: python3.6
+      Timeout: 900
+      Role: !GetAtt DeleteVPCExecutionRole.Arn
+
+  DeleteEKSClusterExecutionRole:
+    DependsOn:
+    - PreInstallValidationResource
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: [lambda.amazonaws.com]
+            Action: ['sts:AssumeRole']
+      Path: /
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/AWSLambdaExecute
+      Policies:
+        - PolicyName: !Join [ "-", [ "DeleteEKS", !Join [ "" , !Split [ "-" , !Select [ 2, !Split [ "/", !Sub '${AWS::StackId}' ] ] ] ] ] ]
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                - cloudformation:*
+                - eks:*
+                - lambda:InvokeFunction
+                - ec2:Delete*
+                - ec2:Describe*
+                - ec2:Detach*
+                - ec2:Dissociate*
+                - ec2:Remove*
+                - ec2:Replace*
+                - ec2:Revoke*
+                - iam:DetachRolePolicy
+                - iam:DeleteRolePolicy
+                - iam:DeleteRole
+                Resource: "*"
+
+  DeleteEKSClusterFunction:
+    DependsOn:
+    - PreInstallValidationResource
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Join [ "-", [ "DeleteEKSfn", !Join [ "" , !Split [ "-" , !Select [ 2, !Split [ "/", !Sub '${AWS::StackId}' ] ] ] ] ] ]
+      Code:
+        ZipFile: |
+                import boto3
+                import json,time
+                import urllib3
+                http = urllib3.PoolManager()
+                def check_status(cloudformation_client,stack):
+                    waiter = cloudformation_client.get_waiter('stack_delete_complete')
+                    try:
+                      waiter.wait(StackName=stack)
+                      return 0
+                    except Exception as e:
+                      cloudformation_client.delete_stack(StackName=stack)
+                      return 0
+                def handler(event, context):
+                    if event['RequestType'] == 'Delete':
+                        try:
+                            vpc_function_arn = event['ResourceProperties']['VPCFunctionName']
+                            clustername = event['ResourceProperties']['Stack']
+                            region = event['ResourceProperties']['Region']
+                            clustername = clustername[:50]
+                            cluster_    = 'Mesh7Controller-{}'.format(clustername)
+                            client = boto3.client('eks',region_name=region)
+                            lambda_client = boto3.client('lambda',region_name=region)
+                            for object in client.list_nodegroups(clusterName=cluster_)['nodegroups'] :
+                                client.delete_nodegroup(nodegroupName=object,clusterName=cluster_)
+                            while len(client.list_nodegroups(clusterName=cluster_)['nodegroups']) > 0 :
+                                pass
+                            client.delete_cluster(name=cluster_)
+                            cloudformation_client = boto3.client('cloudformation')
+                            nodegroup_stacks = []
+                            master_stack = []
+                            stackname='{}-'.format(cluster_)
+                            for stack in cloudformation_client.list_stacks()['StackSummaries']:
+                                if stack['StackStatus'] != 'DELETE_COMPLETE':
+                                  if 'nodegroup' in stack['StackName'] and stackname in stack['StackName']:
+                                    nodegroup_stacks.append(stack['StackName'])
+                                  elif stackname in stack['StackName']:
+                                    master_stack.append(stack['StackName'])
+                            for stack in master_stack:
+                                for resource in cloudformation_client.describe_stack_resources(StackName=stack)['StackResources']:
+                                    if resource['LogicalResourceId'] == 'VPC':
+                                      vpc_id =  resource['PhysicalResourceId']
+                            input = {'vpc_id': vpc_id , 'region':region}
+                            response = lambda_client.invoke(FunctionName = vpc_function_arn , InvocationType = 'RequestResponse' ,Payload = json.dumps(input))
+                            res = json.loads(response['Payload'].read().decode("utf-8"))
+                            print(res['Status'])
+                            time.sleep(30)
+                            for stack in nodegroup_stacks:
+                                 cloudformation_client.delete_stack(StackName=stack)
+                            for stack in master_stack:
+                                 cloudformation_client.delete_stack(StackName=stack)
+                            time.sleep(20)
+                            for stack in nodegroup_stacks:
+                                check_status(cloudformation_client,stack)
+                            for stack in master_stack:
+                                check_status(cloudformation_client,stack)
+                            time.sleep(60)
+                            sendResponseCfn(event, context, "SUCCESS", "Deletion successful")
+                        except Exception as e:
+                            sendResponseCfn(event, context, "FAILED", str(e))
+                    else:
+                      sendResponseCfn(event, context, "SUCCESS", "Not a Delete event")
+                def sendResponseCfn(event, context, responseStatus, message):
+                                    response_body = {'Status': responseStatus,
+                                                      'Reason': message,
+                                                      'PhysicalResourceId': context.log_stream_name,
+                                                      'StackId': event['StackId'],
+                                                      'RequestId': event['RequestId'],
+                                                      'LogicalResourceId': event['LogicalResourceId'],
+                                                      'Data': json.loads("{}")}
+                                    http.request('PUT',event['ResponseURL'], body=json.dumps(response_body))
+
+      Handler: index.handler
+      Runtime: python3.6
+      Timeout: 900
+      Role: !GetAtt DeleteEKSClusterExecutionRole.Arn
+
+  DeleteEKSClusterResource:
+    DependsOn:
+    - PreInstallValidationResource
+    Type: "AWS::CloudFormation::CustomResource"
+    Properties:
+      ServiceToken:
+        !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${DeleteEKSClusterFunction}
+      VPCFunctionName: !Ref DeleteVPCFunction
+      Stack: !Ref AWS::StackName
+      Region: !Ref AWS::Region
+
   Mesh7NLBVPCMirroring:
+    DependsOn:
+    - PreInstallValidationResource
     Type: 'AWS::ElasticLoadBalancingV2::LoadBalancer'
     Condition: NLBCreationEnabled
     Properties:
-     Name:   !Join [ "", [ M7Resource, !Select [ 1, !Split [ "-", !Sub '${Mesh7AdaptorVpcId}' ] ] ] ] 
+     Name:   !Join [ "-", [ "NLB", !Select [ 3 , !Split [ "-" , !Select [ 2, !Split [ "/", !Sub '${AWS::StackId}' ] ] ] ] ] ]
      Scheme: internal
      Type: network
      SubnetMappings:
-        - SubnetId: !Ref Mesh7AdaptorSubnetId 
+        - SubnetId: !Ref Mesh7AdaptorSubnetId
 
   Mesh7NLBVPCMirroringTargetGroup:
+    DependsOn:
+    - PreInstallValidationResource
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Condition: NLBCreationEnabled
     Properties:
-     Name:   !Join [ "", [ M7ResourceTG, !Select [ 1, !Split [ "-", !Sub '${Mesh7AdaptorVpcId}' ] ] ] ]
+     Name:   !Join [ "-", [ "NLBTG", !Select [ 3 , !Split [ "-" , !Select [ 2, !Split [ "/", !Sub '${AWS::StackId}' ] ] ] ] ] ]
      VpcId: !Ref Mesh7AdaptorVpcId
      Port: 4789
      Protocol: TCP_UDP
@@ -490,6 +770,8 @@ Resources:
      HealthCheckPort: '80'
 
   Mesh7NBVPCMirroringListener:
+    DependsOn:
+    - PreInstallValidationResource
     Type: 'AWS::ElasticLoadBalancingV2::Listener'
     Condition: NLBCreationEnabled
     Properties:
@@ -501,13 +783,17 @@ Resources:
       Protocol: TCP_UDP
 
   Mesh7NotificationTopic:
+    DependsOn:
+    - PreInstallValidationResource
     Type: 'AWS::SNS::Topic'
     Condition: CreateNotificationChannel
     Properties:
      TopicName:  !Join [ "-", [ Mesh7Notification, !Join [ "" , !Split [ "-" , !Select [ 2, !Split [ "/", !Sub '${AWS::StackId}' ] ] ] ] ] ]
      DisplayName: "Mesh7 CASO"
-  
+
   Mesh7NotificationSubscription:
+    DependsOn:
+    - PreInstallValidationResource
     Type: AWS::SNS::Subscription
     Condition: CreateNotificationChannel
     Properties:
@@ -516,6 +802,8 @@ Resources:
       TopicArn: !Ref Mesh7NotificationTopic
 
   Mesh7NotificationSNSTopicPolicy:
+    DependsOn:
+    - PreInstallValidationResource
     Type: 'AWS::SNS::TopicPolicy'
     Condition: CreateNotificationChannel
     Properties:
@@ -546,17 +834,19 @@ Resources:
             Service: 'ec2.amazonaws.com'
             AWS: '*'
           Resource: !Ref Mesh7NotificationTopic
-          Action: 'sns:Publish'          
+          Action: 'sns:Publish'
         - Sid: SubscriptionPolicy
           Effect: Allow
           Principal:
             AWS: '*'
           Action: 'sns:Subscribe'
-          Resource: !Ref Mesh7NotificationTopic 
+          Resource: !Ref Mesh7NotificationTopic
       Topics:
       - !Ref Mesh7NotificationTopic
 
   TrailBucket:
+    DependsOn:
+    - PreInstallValidationResource
     Type: 'AWS::S3::Bucket'
     DeletionPolicy: Delete
     Condition: CloudTrailLoggingEnabled
@@ -567,6 +857,8 @@ Resources:
           Status: Enabled
           ExpirationInDays: 1
   TrailBucketPolicy:
+    DependsOn:
+    - PreInstallValidationResource
     Type: 'AWS::S3::BucketPolicy'
     Condition: CloudTrailLoggingEnabled
     Properties:
@@ -590,14 +882,20 @@ Resources:
             StringEquals:
               's3:x-amz-acl': 'bucket-owner-full-control'
   TrailSQS:
+    DependsOn:
+    - PreInstallValidationResource
     Type: AWS::SQS::Queue
     Condition: CloudTrailLoggingEnabled
     Properties: {}
   TrailSNSTopic:
+    DependsOn:
+    - PreInstallValidationResource
     Type: AWS::SNS::Topic
     Condition: CloudTrailLoggingEnabled
     Properties: {}
   TrailSNStoSQSSubscription:
+    DependsOn:
+    - PreInstallValidationResource
     Type: AWS::SNS::Subscription
     Condition: CloudTrailLoggingEnabled
     Properties:
@@ -606,6 +904,8 @@ Resources:
       RawMessageDelivery: true
       TopicArn: !Ref TrailSNSTopic
   TrailSNSTopicPolicy:
+    DependsOn:
+    - PreInstallValidationResource
     Type: 'AWS::SNS::TopicPolicy'
     Condition: CloudTrailLoggingEnabled
     Properties:
@@ -639,6 +939,8 @@ Resources:
       Topics:
       - !Ref TrailSNSTopic
   TrailSNS2SQSPolicy:
+    DependsOn:
+    - PreInstallValidationResource
     Type: AWS::SQS::QueuePolicy
     Condition: CloudTrailLoggingEnabled
     Properties:
@@ -660,6 +962,7 @@ Resources:
     DependsOn:
     - TrailBucketPolicy
     - TrailSNSTopicPolicy
+    - PreInstallValidationResource
     Type: 'AWS::CloudTrail::Trail'
     Condition: CloudTrailLoggingEnabled
     Properties:
@@ -670,17 +973,21 @@ Resources:
       - IncludeManagementEvents: !Ref IsCloudTrailManagementEventsEnabled
         DataResources:
         - Type: 'AWS::S3::Object'
-          Values: !Ref S3BucketsToTrail 
+          Values: !Ref S3BucketsToTrail
       S3BucketName: !Ref TrailBucket
       EnableLogFileValidation: true
       SnsTopicName: !GetAtt 'TrailSNSTopic.TopicName'
 
   Mesh7LogGroup:
+    DependsOn:
+    - PreInstallValidationResource
     Type: AWS::IAM::Group
     Condition: Mesh7IAMGroupCreateEnabled
     Properties: {}
 
   Mesh7LogPolicy:
+    DependsOn:
+    - PreInstallValidationResource
     Type: AWS::IAM::Policy
     Condition: Mesh7LogPolicyEnabled
     Properties:
@@ -706,6 +1013,8 @@ Resources:
       Groups: [!Ref 'Mesh7LogGroup']
 
   Mesh7LoggingUser:
+    DependsOn:
+    - PreInstallValidationResource
     Type: AWS::IAM::User
     Condition: Mesh7IAMUserCreateEnabled
     Properties:
@@ -713,6 +1022,8 @@ Resources:
       UserName : !Join [ "-", [ Mesh7LoggingUser, !Join [ "" , !Split [ "-" , !Select [ 2, !Split [ "/", !Sub '${AWS::StackId}' ] ] ] ] ] ]
 
   Mesh7KMARole:
+    DependsOn:
+    - PreInstallValidationResource
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
@@ -729,6 +1040,8 @@ Resources:
       - arn:aws:iam::aws:policy/AmazonEKSClusterPolicy
 
   Mesh7EKSPolicies:
+    DependsOn:
+    - PreInstallValidationResource
     Type: AWS::IAM::Policy
     Properties:
       PolicyName: !Join ["-", [ Mesh7EKSPolicy, !Join [ "" , !Split [ "-" , !Select [ 2, !Split [ "/", !Sub '${AWS::StackId}' ] ] ] ] ] ]
@@ -865,6 +1178,8 @@ Resources:
       - !Ref Mesh7KMARole
 
   Mesh7KMARolePolicies:
+    DependsOn:
+    - PreInstallValidationResource
     Type: AWS::IAM::Policy
     Condition: Mesh7IAMGroupCreateEnabled
     Properties:
@@ -891,6 +1206,8 @@ Resources:
       Groups: [!Ref 'Mesh7LogGroup']
 
   Mesh7KMARoleVPCMirroringPolicies:
+     DependsOn:
+     - PreInstallValidationResource
      Type: AWS::IAM::Policy
      Condition: Mesh7IAMGroupCreateEnabled
      Properties:
@@ -922,14 +1239,16 @@ Resources:
        Groups: [!Ref 'Mesh7LogGroup']
 
   Mesh7VPCMirroringNLBPolicy:
+    DependsOn:
+    - PreInstallValidationResource
     Type: AWS::IAM::Policy
     Condition: Mesh7IAMGroupCreateEnabled
-    Properties: 
+    Properties:
       PolicyName: !Join ["-" , [ Mesh7KMARoleVPCMirroringNLB, !Join [ "" , !Split [ "-" , !Select [ 2, !Split [ "/", !Sub '${AWS::StackId}' ] ] ] ] ] ]
       PolicyDocument:
          Statement:
          - Effect: Allow
-           Action: 
+           Action:
            - elasticloadbalancing:DescribeTargetGroupAttributes
            - elasticloadbalancing:CreateTargetGroup
            - elasticloadbalancing:DeleteListener
@@ -944,15 +1263,17 @@ Resources:
            - elasticloadbalancing:ModifyTargetGroup
            - elasticloadbalancing:RegisterTargets
            - elasticloadbalancing:RemoveTags
-           Resource: '*'   
+           Resource: '*'
       Roles:
       - !If
          - NLBCreationEnabled
          - !Ref Mesh7KMARole
          - !Ref AWS::NoValue
       Groups: [!Ref 'Mesh7LogGroup']
-          
+
   Mesh7KMAInstanceProfile:
+    DependsOn:
+    - PreInstallValidationResource
     Type: AWS::IAM::InstanceProfile
     Properties:
       InstanceProfileName: !Ref Mesh7KMARole
@@ -960,9 +1281,11 @@ Resources:
       - !Ref Mesh7KMARole
 
   SecurityGroup:
+       DependsOn:
+       - PreInstallValidationResource
        Type: AWS::EC2::SecurityGroup
        Properties:
-           VpcId: !Ref Mesh7AdaptorVpcId 
+           VpcId: !Ref Mesh7AdaptorVpcId
            GroupDescription: "Security Group for KMA"
            GroupName: !Join [ "-", [ "Mesh7KMASG", !Join [ "" , !Split [ "-" , !Select [ 2, !Split [ "/", !Sub '${AWS::StackId}' ] ] ] ] ] ]
            SecurityGroupIngress:
@@ -983,6 +1306,10 @@ Resources:
                  ToPort: 15010
                  CidrIp: 0.0.0.0/0
                - IpProtocol: tcp
+                 FromPort: 15005
+                 ToPort:   15006
+                 CidrIp: 0.0.0.0/0
+               - IpProtocol: tcp
                  FromPort: 15011
                  ToPort: 15011
                  CidrIp: 0.0.0.0/0
@@ -990,20 +1317,22 @@ Resources:
                  FromPort: 4789
                  ToPort: 4789
                  CidrIp: 0.0.0.0/0
-               - !If 
+               - !If
                  - NLBCreationEnabled
                  - IpProtocol: tcp
                    FromPort: 80
                    ToPort:   80
                    CidrIp: 0.0.0.0/0
-                 - !Ref AWS::NoValue 
+                 - !Ref AWS::NoValue
 
   Mesh7AdapterInterface:
+      DependsOn:
+      - PreInstallValidationResource
       Type: AWS::EC2::NetworkInterface
       Properties:
         Description: NetworkInterface for KMA
         GroupSet:    [!Ref SecurityGroup]
-        SubnetId: !Ref Mesh7AdaptorSubnetId 
+        SubnetId: !Ref Mesh7AdaptorSubnetId
         Tags:
          - !If
             - VPCMirroringEnabled
@@ -1012,14 +1341,16 @@ Resources:
             - !Ref AWS::NoValue
   Mesh7KMA:
     Type: AWS::EC2::Instance
+    DependsOn:
+      - PreInstallValidationResource
     Properties:
       ImageId: !FindInMap [KMARegionMap, !Ref "AWS::Region", ami]
       KeyName:
-        Ref: Mesh7AdaptorKeyPairName 
+        Ref: Mesh7AdaptorKeyPairName
       NetworkInterfaces:
         - NetworkInterfaceId: !Ref Mesh7AdapterInterface
           DeviceIndex: '0'
-      InstanceType: t2.2xlarge
+      InstanceType: t2.xlarge
       IamInstanceProfile: !Ref Mesh7KMAInstanceProfile
       Tags:
       - Key: Name
@@ -1036,26 +1367,26 @@ Resources:
               #!/bin/bash
               set -o errtrace
               exec > >(tee -a "/home/ubuntu/mesh7_install_aws.log") 2>&1
-              ### Creating the Input Variables file - Needed for scripts 
+              ### Creating the Input Variables file - Needed for scripts
               ### This file will be residing in /opt/kavach/scripts folder
               ### Need for the file is that if the script stucks at anypoint - the user need not call the script with arguments
               INSTALLATION_FOLDER=/opt/kavach
               sudo mkdir -p $INSTALLATION_FOLDER
-              ### Installation Folder - /opt/kavach -where the controller package is extracted 
-              ### ControllerPackageUrl Feeds the Package url - if not specified the package url will be formed dynamically with version specified from 
-              ### Version parameter and DeployementSize chosen by User - Version is optional when the Package url is specified *** URL should be a public URL where the KMA Vm Can reach 
-              ### KMAVPC and KMASubnet Ids needs to be a public Network where user can reach via ssh and the KMA is the gateway for client EC2 vms in the AWS Cloud 
+              ### Installation Folder - /opt/kavach -where the controller package is extracted
+              ### ControllerPackageUrl Feeds the Package url - if not specified the package url will be formed dynamically with version specified from
+              ### Version parameter and DeployementSize chosen by User - Version is optional when the Package url is specified *** URL should be a public URL where the KMA Vm Can reach
+              ### KMAVPC and KMASubnet Ids needs to be a public Network where user can reach via ssh and the KMA is the gateway for client EC2 vms in the AWS Cloud
               ### VPC and Subnet should be where the client AWS VMS are located.
               ### KMARegion is the stack region and ControllerRegion can be any region (from Zonemap)  - KMA Region and ControllerRegion can also be similar.
               ### EKS Cluster Creates New VPC - so CFT Intiation user should have rights to create VPC and Subnets .
-              ### Deployment Mode indicates the Mode in which the AWS KMA Needs to be deployed 
+              ### Deployment Mode indicates the Mode in which the AWS KMA Needs to be deployed
                 ### Options:
                     ### VPCMirroring - simple Mode where the VPCMirroring objects are created to capture traffic flow between Mesh and Outside World and internal flows.
                     ### HostAgent    - HostAgent will install sidecar in each Mesh Vms and watches the traffic flow ingress and egress of VMS.
               ### GIT_REPO_URL - Git Repository URL ( Mutually exclustive with ControllerPackageURL)
               ### Mesh7Package - Downloaded Package Name
               ### EMAIL and Domain Names can be left as an empty string if you dont have domain name for certificate provisioning
-              ### Eventhough Certificate is provisioned using cert-manager certificate takes effect when the installaiton is success and domain entry is added manually at provider end. 
+              ### Eventhough Certificate is provisioned using cert-manager certificate takes effect when the installaiton is success and domain entry is added manually at provider end.
               sudo echo '
                     VERSION="__VERSION__"
                     INSTALLATION_MODE="${InstallationMode}"
@@ -1080,12 +1411,12 @@ Resources:
                     INSTALLATION_FOLDER=/opt/kavach
                     NLB_ARN="${NLBArn}"
                     TOPICARN="${TopicArn}"'   > $INSTALLATION_FOLDER/variables.sh
-                               
+
                ### Mesh7 Package Download and Pre-requisites Fulfillment
                    ### Mesh7 Package is downloaded into home folder of user (/home/ubuntu) and extracted into /opt/kavach folder
                    ### Folder Structure
                    ### --------------------------------------------------------------------------------------------------------------------------------
-                   ### /opt/kavach   
+                   ### /opt/kavach
                    ###   ├── 001-namespace.yaml --> creates the mesh7 namespace in controller cluster
                    ###   ├── 002-controller-objects.yaml  ---> installs  all the controller components in the eks cluster created .
                    ###   ├── 003-cert-manager.yaml        ----> Invoked only when domain and email are provided to create certificate.
@@ -1097,7 +1428,7 @@ Resources:
                    ###       ├── lib_functions.sh            ---> Library function needed for all shell scripts
                    ###       |── start_installation.sh       ---> start_installation co-ordinates the overall install - logs the activites in /home/ubunut/mesh7_install_aws.log file - so when the installation stops due to error - just re-run the script again ./start_installation.sh from to complete the steps.
                    ###       |-- variables.sh                ---> All Input variables will be sourced from here to each script.
-                   ### ----------------------------------------------------------------------------------------------------------------------------------    
+                   ### ----------------------------------------------------------------------------------------------------------------------------------
                    sudo echo  '
                             #!/usr/bin/env bash
                             set -x
@@ -1143,24 +1474,24 @@ Resources:
                             ensure_variable "MESH7_PACKAGE" $MESH7_PACKAGE
                             ensure_variable "KMA_ROLE_ARN" $KMA_ROLE_ARN
                             if [[ $PACKAGE_URL == "" ]];then
-                                  PACKAGE_URL=${!GIT_REPO_URL}/releases/download/${!VERSION}/${!DEPLOYMENT_SIZE}_aws_mesh7.tar.gz
+                                  PACKAGE_URL=${!GIT_REPO_URL}/releases/download/${!VERSION}/mesh7_controller.tar.gz
                                   sudo echo PACKAGE_URL="${!PACKAGE_URL}" >> $INSTALLATION_FOLDER/variables.sh
                             fi
-                            
+
                             retry=5
                             attempt=0
                             if [ ! -f "~/$MESH7_PACKAGE"  ];then
                             ### Package download will be retried 5 times to eliminate any intermittent network connectivity
-                            while [ $attempt -lt $retry ]
-                            do
-                                response_code=`curl -LJ --insecure --write-out "%{http_code}\n" -H  --silent $PACKAGE_URL -S -f -o /home/ubuntu/$MESH7_PACKAGE`
-                                if [ $response_code -eq 200 ];then
-                                break
-                                fi
-                                ((attempt=$attempt+1))
-                                sleep 5
-                                echo "Retrying Controller Package download: try $attempt ..."
-                            done
+                              while [ $attempt -lt $retry ]
+                              do
+                                  response_code=`curl -LJ --insecure --write-out "%{http_code}\n" -H  --silent $PACKAGE_URL -S -f -o /home/ubuntu/$MESH7_PACKAGE`
+                                  if [ $response_code -eq 200 ];then
+                                    break
+                                  fi
+                                  ((attempt=$attempt+1))
+                                  sleep 5
+                                  echo "Retrying Controller Package download: try $attempt ..."
+                              done
                             fi
                             if [[  ! -f ~/$MESH7_PACKAGE  ]];then
                                 echo "Failed to download Mesh7 controller package $PACKAGE_URL."
@@ -1177,23 +1508,25 @@ Resources:
                             fi
 
                             ' >  $INSTALLATION_FOLDER/mesh7_install_aws.sh
-                    ### Ensuring Correct permissions. 
+                    ### Ensuring Correct permissions.
                     sudo chown -R ubuntu:ubuntu $INSTALLATION_FOLDER
                     sudo chmod +x $INSTALLATION_FOLDER/mesh7_install_aws.sh  $INSTALLATION_FOLDER/variables.sh
                     sudo -u ubuntu bash $INSTALLATION_FOLDER/mesh7_install_aws.sh -i $INSTALLATION_FOLDER
                     if [ $? -eq 0 ];then
+                        mkdir -p $INSTALLATION_FOLDER/scripts
                         source  $INSTALLATION_FOLDER/variables.sh
-                        sudo mv $INSTALLATION_FOLDER/variables.sh $INSTALLATION_FOLDER/scripts
+                        sudo mv $INSTALLATION_FOLDER/variables.sh $INSTALLATION_FOLDER/scripts/
+                        sudo mv $INSTALLATION_FOLDER/aws/scripts/* $INSTALLATION_FOLDER/scripts/
                         pushd $INSTALLATION_FOLDER/scripts
                         sudo -u ubuntu bash start_installation.sh
                         ### After installation is success we will remove the EKS Policy as we no longer need the permission to create the EKS Cluster from the instance.
                         if [ $? -eq 0 ];then
                            svc_url=`sudo -u ubuntu kubectl get services -n mesh7-system -l component=controller| grep -v NAME | awk '{print $4}'`
                            message=(`echo "Mesh7 Cloud Application Security Observability successfully installed. Mesh7 CASO Dashboard: $svc_url"`)
-                           [[ $INSTALLATION_MODE == "ControllerOnly" ]] && message+=(`echo "-----Mesh7Controller Context: aws eks --region $CONTROLLER_REGION update-kubeconfig Mesh7Controller-$STACK"`) 
+                           [[ $INSTALLATION_MODE == "ControllerOnly" ]] && message+=(`echo "-----Mesh7Controller Context: aws eks --region $CONTROLLER_REGION update-kubeconfig Mesh7Controller-$STACK"`)
                            message=`printf "%s " "${!message[@]}"`
                            [[ -n ${!TOPICARN} ]] && aws sns publish --topic-arn ${!TOPICARN} --message "${!message}"  --subject "Mesh7 CASO: Welcome" || echo "Mesh7 Cloud Application Security Observability successfully installed. Mesh7 CASO Dashboard: $svc_url"
-                           aws iam delete-role-policy --role-name ${Mesh7KMARole} --policy-name Mesh7EKSPolicy-${StackID} 
+                           aws iam delete-role-policy --role-name ${Mesh7KMARole} --policy-name Mesh7EKSPolicy-${StackID}
                            if [ -n "${!NLB_ARN}" ];then
                               sudo apt update -y && sudo apt install nginx -y
                            fi
@@ -1206,7 +1539,7 @@ Resources:
                     else
                         [[ -n ${!TOPICARN} ]] && aws sns publish --topic-arn ${!TOPICARN} --message "Installation of Mesh7Adapter and Mesh7 Controller failed : Package not available" --subject "Mesh7 Installation" || echo "Installation of Mesh7Adaptor failed: Package url not valid"
                     fi
-                    
+
 
             - {
                Zones:    !FindInMap [ ZoneMap,  !Ref "ControllerRegion",  zones],
@@ -1236,5 +1569,5 @@ Outputs:
     Value : !Ref TrailSQS
     Condition: CloudTrailLoggingEnabled
   Mesh7ControllerEKSClusterConfig:
-    Description: 'Controller Cluster context - run from one of the owners provided in stack'  
+    Description: 'Controller Cluster context - run from one of the owners provided in stack'
     Value:  !Sub "aws eks --region ${ControllerRegion} update-kubeconfig --name Mesh7Controller-${AWS::StackName}"
