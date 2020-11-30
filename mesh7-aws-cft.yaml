@@ -677,16 +677,17 @@ Resources:
                             vpc_function_arn = event['ResourceProperties']['VPCFunctionName']
                             clustername = event['ResourceProperties']['Stack']
                             region = event['ResourceProperties']['Region']
+                            controllerregion = event['ResourceProperties']['ControllerRegion']
                             clustername = clustername[:50]
                             cluster_    = 'Mesh7Controller-{}'.format(clustername)
-                            client = boto3.client('eks',region_name=region)
+                            client = boto3.client('eks',region_name=controllerregion)
                             lambda_client = boto3.client('lambda',region_name=region)
                             for object in client.list_nodegroups(clusterName=cluster_)['nodegroups'] :
                                 client.delete_nodegroup(nodegroupName=object,clusterName=cluster_)
                             while len(client.list_nodegroups(clusterName=cluster_)['nodegroups']) > 0 :
                                 pass
                             client.delete_cluster(name=cluster_)
-                            cloudformation_client = boto3.client('cloudformation')
+                            cloudformation_client = boto3.client('cloudformation',region_name=controllerregion)
                             nodegroup_stacks = []
                             master_stack = []
                             stackname='{}-'.format(cluster_)
@@ -745,6 +746,7 @@ Resources:
       VPCFunctionName: !Ref DeleteVPCFunction
       Stack: !Ref AWS::StackName
       Region: !Ref AWS::Region
+      ControllerRegion: !Ref ControllerRegion
 
   Mesh7NLBVPCMirroring:
     DependsOn:
