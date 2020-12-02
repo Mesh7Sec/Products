@@ -343,6 +343,7 @@ Resources:
         - NLBCreationEnabled
         - !Ref Mesh7NLBVPCMirroring
         - !Ref Mesh7AdapterInterface
+      DeletionPolicy: Delete
 
   DeleteTrailBucketExecutionRole:
     DependsOn:
@@ -449,6 +450,19 @@ Resources:
       Path: /
       ManagedPolicyArns:
       - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: !Join [ "" , !Split [ "-" , !Select [ 2, !Split [ "/", !Sub '${AWS::StackId}' ] ] ] ]
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                - logs:*
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                - 'ec2:describe*'
+                Resource: "*"
 
   PreInstallValidationFunction:
     Type: AWS::Lambda::Function
@@ -463,18 +477,29 @@ Resources:
                      packageurl = event['ResourceProperties']['PackageURL']
                      licensekey = event['ResourceProperties']['LicenseKey']
                      licensename = event['ResourceProperties']['LicenseName']
+                     subnet      = event['ResourceProperties']['SubnetId']
                      if event['RequestType'] == 'Create':
                         try:
                           if packageurl != '':
                              res = http.request('GET',packageurl)
                              if res.status != 200:
                                 raise Exception("Package url not accessible")
-                          if licensekey != '':
+                          else:
+                             raise Exception('Package URL should not be empty')
+                          if ( licensekey != '' ) & ( licensename != '' ) :
                              url = "https://www.googleapis.com/storage/v1/b/mesh7-controller-install/o/{}%2fimage_pull_secret.json?alt=media".format(licensename)
                              header = {"Authorization":"Bearer {}".format(licensekey)}
                              if http.request('GET',url=url,headers=header).status != 200:
                                 raise Exception("License Key or license name not valid")
-                          sendResponseCfn(event, context, "SUCCESS", "URL and License key is valid")
+                          else:
+                             raise Exception("License key(or) name  cannot be empty' )
+                          client_ = boto3.resource('ec2')
+                          subnet_client = client_.Subnet(subnet)
+                          if subnet_client.map_public_ip_on_launch:
+                             pass
+                          else:
+                             raise Exception("Subnet {} does not have allocating public ip on launch capablity".format(subnet))
+                          sendResponseCfn(event, context, "SUCCESS", "Pre-Installation-checks success")
                         except Exception as e:
                           sendResponseCfn(event, context, "FAILED" , str(e))
                      else:
@@ -502,6 +527,9 @@ Resources:
       PackageURL: !Ref ControllerPackageUrl
       LicenseKey: !Ref Mesh7LicenseKey
       LicenseName: !Ref Mesh7LicenseName
+      SubnetId:   !Ref Mesh7AdaptorSubnetId
+      DeletionPolicy: Delete
+
   DeleteVPCExecutionRole:
     DependsOn:
     - PreInstallValidationResource
@@ -747,6 +775,7 @@ Resources:
       Stack: !Ref AWS::StackName
       Region: !Ref AWS::Region
       ControllerRegion: !Ref ControllerRegion
+      DeletionPolicy: Delete
 
   Mesh7NLBVPCMirroring:
     DependsOn:
