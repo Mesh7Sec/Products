@@ -25,8 +25,33 @@ Metadata:
       - Domain
       - DeploymentMode
       - NLBEnabled
+    - Label:
+        default: "AdaptorOnly mode config"
+      Parameters:
+      - ControllerURL
+      - ClusterName
+      - TenantName
+      - ClusterAccessToken
 
 Parameters:
+  ControllerURL:
+      Description: 'Controller Domain name/IP where the adaptor package is present and to be installed on the KMA'
+      Type: String
+      Default: ""
+  ClusterName:
+      Description: 'Name of the client cluster package to be downloaded and installed on Adaptor'
+      Type: String
+      Default: ""
+  TenantName:
+      Description: 'Name of the tenant name where the client package is created'
+      Type: String
+      Default: "default"
+  ClusterAccessToken:
+      Description: 'Authentication token created for accessing controller cluster'
+      Type: String
+      Default: ""
+      NoEcho: true
+
   Owners:
       Description: 'Comma seperated list of IAM users who will have access to controller EKS cluster. If empty, will default to root of the current account'
       Type: String
@@ -39,6 +64,7 @@ Parameters:
       AllowedValues:
       - "ControllerAndAdaptor"
       - "ControllerOnly"
+      - "AdaptorOnly"
 
   Email:
       Description: 'Email Address to created Certificates for FQDN and Will be used as notification channel for controller installation lifecycle.....'
@@ -166,23 +192,27 @@ Parameters:
       - 'false'
 
 Conditions:
-  VPCMirroringEnabled: !Equals [ !Ref DeploymentMode, VPCMirroring ]
+  VPCMirroringEnabled: !And
+  - !Equals [ !Ref DeploymentMode, VPCMirroring ]
+  - !Not [ !Equals [ !Ref InstallationMode , ControllerOnly ] ]
   NLBCreationEnabled:  !And
   - !Equals [ !Ref DeploymentMode, VPCMirroring ]
   - !Equals [ !Ref NLBEnabled , true ]
-  - !Equals [ !Ref InstallationMode, ControllerAndAdaptor ]
-  CloudTrailLoggingEnabled: !And
-  - !Equals [ !Ref EnableCloudTrailLogging, true ]
-  - !Equals [ !Ref InstallationMode, ControllerAndAdaptor ]
+  - !Not [ !Equals [ !Ref InstallationMode, ControllerOnly ] ]
+  CloudTrailLoggingEnabled: !Equals [ !Ref EnableCloudTrailLogging, true ]
   Mesh7IAMGroupCreateEnabled: !Equals [ !Ref CreateMesh7IAMGroup, true ]
   Mesh7LogPolicyEnabled:  !And
   - !Equals [ !Ref EnableCloudTrailLogging, true ]
   - !Equals [ !Ref CreateMesh7IAMGroup, true ]
-  - !Equals [ !Ref InstallationMode, ControllerAndAdaptor ]
   Mesh7IAMUserCreateEnabled: !And
   - !Equals [ !Ref CreateMesh7IAMGroup, true ]
   - !Equals [ !Ref CreateMesh7IAMUser, true ]
   CreateNotificationChannel: !Not [ !Equals [ !Ref Email , "" ] ]
+  AdaptorOnlyMode: !Equals [ !Ref InstallationMode, AdaptorOnly ]
+  ControllerPresent: !Or
+  - !Equals [ !Ref InstallationMode , ControllerAndAdaptor ]
+  - !Equals [ !Ref InstallationMode , ControllerOnly ]
+
 
 Mappings:
   KMARegionMap:
@@ -478,21 +508,40 @@ Resources:
                      licensekey = event['ResourceProperties']['LicenseKey']
                      licensename = event['ResourceProperties']['LicenseName']
                      subnet      = event['ResourceProperties']['SubnetId']
+                     installation_mode = event['ResourceProperties']['InstallationMode']
+                     controller_domain = event['ResourceProperties']['ControllerDomain']
+                     token             = event['ResourceProperties']['Token']
+                     cluster             = event['ResourceProperties']['Cluster']
+                     tenant             = event['ResourceProperties']['Tenant']
                      if event['RequestType'] == 'Create':
                         try:
-                          if packageurl != '':
-                             res = http.request('GET',packageurl)
-                             if res.status != 200:
-                                raise Exception("Package url {} not accessible".format(packageurl))
+                          if installation_mode == "ControllerAndAdaptor" or installation_mode == "ControllerOnly" :
+                            if packageurl != '':
+                              res = http.request('GET',packageurl)
+                              if res.status != 200:
+                                  raise Exception("Package url {} not accessible".format(packageurl))
+                            else:
+                              raise Exception('Package URL should not be empty')
+                            if ( licensekey != '' ) & ( licensename != '' ) :
+                              url = "https://www.googleapis.com/storage/v1/b/mesh7-controller-install/o/{}%2fimage_pull_secret.json?alt=media".format(licensename)
+                              header = {"Authorization":"Bearer {}".format(licensekey)}
+                              if http.request('GET',url=url,headers=header).status != 200:
+                                  raise Exception("License Key or license name not valid")
+                            else:
+                              raise Exception("License key(or) name  cannot be empty")
                           else:
-                             raise Exception('Package URL should not be empty')
-                          if ( licensekey != '' ) & ( licensename != '' ) :
-                             url = "https://www.googleapis.com/storage/v1/b/mesh7-controller-install/o/{}%2fimage_pull_secret.json?alt=media".format(licensename)
-                             header = {"Authorization":"Bearer {}".format(licensekey)}
-                             if http.request('GET',url=url,headers=header).status != 200:
-                                raise Exception("License Key or license name not valid")
-                          else:
-                             raise Exception("License key(or) name  cannot be empty")
+                            if installation_mode == "AdaptorOnly":
+                              if controller_domain != "":
+                                endpoint="mesh7/resources/package?tenant={}&cluster={}".format(tenant,cluster)
+                                request_url = "{}/{}".format(controller_domain,endpoint)
+                                headers={'Authorization': 'Bearer {}'.format(token)}
+                                res = http.request('GET',request_url,headers=headers)
+                                print(res.status)
+                                if res.status != 200:
+                                  raise Exception("Client package not availabele for download")
+                              else:
+                                raise Exception("Controller Domain name not available - please provide controller domain/ip when selecting adaptoronly")
+
                           client_ = boto3.resource('ec2')
                           subnet_client = client_.Subnet(subnet)
                           if subnet_client.map_public_ip_on_launch:
@@ -502,6 +551,7 @@ Resources:
                           sendResponseCfn(event, context, "SUCCESS", "Pre-Installation-checks success")
                         except Exception as e:
                           sendResponseCfn(event, context, "FAILED" , str(e))
+
                      else:
                         sendResponseCfn(event, context , "SUCCESS", "Skipped the Operation")
                  def sendResponseCfn(event, context, responseStatus, message):
@@ -528,11 +578,17 @@ Resources:
       LicenseKey: !Ref Mesh7LicenseKey
       LicenseName: !Ref Mesh7LicenseName
       SubnetId:   !Ref Mesh7AdaptorSubnetId
+      InstallationMode: !Ref InstallationMode
+      Cluster:          !Ref ClusterName
+      Tenant:           !Ref TenantName
+      ControllerDomain: !Ref ControllerURL
+      Token:            !Ref ClusterAccessToken
       DeletionPolicy: Delete
 
   DeleteVPCExecutionRole:
     DependsOn:
     - PreInstallValidationResource
+    Condition: ControllerPresent
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
@@ -571,6 +627,7 @@ Resources:
   DeleteVPCFunction:
     DependsOn:
     - PreInstallValidationResource
+    Condition: ControllerPresent
     Type: AWS::Lambda::Function
     Properties:
       FunctionName: !Join [ "-", [ "DeleteVPCfn", !Join [ "" , !Split [ "-" , !Select [ 2, !Split [ "/", !Sub '${AWS::StackId}' ] ] ] ] ] ]
@@ -642,6 +699,7 @@ Resources:
       Role: !GetAtt DeleteVPCExecutionRole.Arn
 
   DeleteEKSClusterExecutionRole:
+    Condition: ControllerPresent
     DependsOn:
     - PreInstallValidationResource
     Type: AWS::IAM::Role
@@ -680,6 +738,7 @@ Resources:
                 Resource: "*"
 
   DeleteEKSClusterFunction:
+    Condition: ControllerPresent
     DependsOn:
     - PreInstallValidationResource
     Type: AWS::Lambda::Function
@@ -762,6 +821,7 @@ Resources:
       Role: !GetAtt DeleteEKSClusterExecutionRole.Arn
 
   DeleteEKSClusterResource:
+    Condition: ControllerPresent
     DependsOn:
     - PreInstallValidationResource
     Type: "AWS::CloudFormation::CustomResource"
@@ -1369,8 +1429,141 @@ Resources:
             - Key: MESH7-VPC-MIRRORING
               Value: Target-NIC
             - !Ref AWS::NoValue
+
+  Mesh7Adaptor:
+    Type: AWS::EC2::Instance
+    Condition: AdaptorOnlyMode
+    DependsOn:
+      - PreInstallValidationResource
+    Properties:
+      ImageId: !FindInMap [KMARegionMap, !Ref "AWS::Region", ami]
+      KeyName:
+        Ref: Mesh7AdaptorKeyPairName
+      NetworkInterfaces:
+        - NetworkInterfaceId: !Ref Mesh7AdapterInterface
+          DeviceIndex: '0'
+      InstanceType: t2.xlarge
+      IamInstanceProfile: !Ref Mesh7KMAInstanceProfile
+      Tags:
+      - Key: Name
+        Value: !Join [ "-", [ "Mesh7KMA",  !Sub '${AWS::StackName}'] ]
+      - !If
+         - VPCMirroringEnabled
+         - Key: MESH7-VPC-MIRRORING
+           Value: Target-VM
+         - !Ref AWS::NoValue
+      UserData:
+        Fn::Base64:
+          !Sub
+            - |
+                #!/bin/bash
+                set -o errtrace
+                exec > >(tee -a "/home/ubuntu/mesh7_install_aws.log") 2>&1
+                ### Creating the Input Variables file - Needed for scripts
+                ### This file will be residing in /opt/kavach/scripts folder
+                ### Need for the file is that if the script stucks at anypoint - the user need not call the script with arguments
+                INSTALLATION_FOLDER=/opt/kavach
+                sudo mkdir -p $INSTALLATION_FOLDER
+                ### Installation Folder - /opt/kavach -where the controller package is extracted
+                ### ControllerDomain - Controller domain/ip to fetch the client package
+                ### Token  - Token to authorize package download
+                ### Cluster - Client cluster package name
+                ### VPCID - Vpc ID to install client adaptor
+                sudo echo '
+                      KMA_ROLE_ARN="${Mesh7KMARole.Arn}"
+                      EMAIL="${EMAIL}"
+                      CONTROLLER_DOMAIN="${ControllerDomain}"
+                      VPCID="${Mesh7AdaptorVpcId}"
+                      KMAREGION="${AWS::Region}"
+                      INSTANCE_PROFILE="${Mesh7KMAInstanceProfile}"
+                      INSTALLATION_FOLDER=/opt/kavach
+                      NLB_ARN="${NLBArn}"
+                      TENANT="${Tenant}"
+                      CLUSTER="${Cluster}"
+                      TOKEN="${Token}"
+                      TOPICARN="${TopicArn}"'   > $INSTALLATION_FOLDER/variables.sh
+                  source $INSTALLATION_FOLDER/variables.sh
+                  function download_package() {
+                  [[ -z ${!CONTROLLER_DOMAIN} ]] && echo "Controller domain/ip should not be empty "  && return 1
+                  [[ -z ${!TENANT} ]] &&  echo "Tenant should not be empty "  && return 1
+                  [[ -z ${!CLUSTER} ]] && echo "cluster name should not be empty "  && return 1
+                  [[ -z ${!TOKEN} ]] &&  echo "auth token should not be empty "  && return 1
+                  ### forminig endpoint
+                  ENDPOINT="mesh7/resources/package?tenant=${!TENANT}&cluster=${!CLUSTER}"
+                  CHECKSUM_ENDPOINT="mesh7/resources/checksum?tenant=${!TENANT}&cluster=${!CLUSTER}"
+                  pushd $INSTALLATION_FOLDER
+                    response=$(curl --retry 30 --retry-delay 20 --connect-timeout 30 --max-time 30 -k -L --write-out "%{http_code}\n" --silent "${!CONTROLLER_DOMAIN}/${!ENDPOINT}" -H "Authorization: Bearer $TOKEN" -OJ )
+                    if [[ "${!response}" != "200" ]]
+                    then
+                      echo "Client package download failure due to $response"
+                      return 1
+                    fi
+                    ### download the checksum contents and verifying integrity
+                    response=$(curl --retry 30 --retry-delay 20 --connect-timeout 30 --max-time 30 -k -L --write-out "%{http_code}\n" --silent "${!CONTROLLER_DOMAIN}/${!CHECKSUM_ENDPOINT}" -H "Authorization: Bearer $TOKEN" -OJ )
+                    if [[ "${!response}" != "200" ]]
+                    then
+                      echo "Client package checksum download failure due to $response"
+                      return 1
+                    fi
+                  md5sum -c md5checksum
+                  if [[ $? -ne 0 ]]
+                  then
+                    echo "Client package downloaded is corrupted..."
+                    return 1
+                  fi
+                  file=$(cat md5checksum | awk '{print $2}')
+                  tar -xvf ${!file}
+                  popd
+                  echo "Downloaded package at ${!file}..."
+                  }
+                  status=$(download_package)
+                  if [[ $status == 1 ]]
+                  then
+                      echo "Client installation failure due to package download failed from ${!CONTROLLER_DOMAIN}..."
+                      [[ -n ${!TOPICARN} ]] && aws sns publish --topic-arn ${!TOPICARN} --message "Client installation failure due to package download failed from ${!CONTROLLER_DOMAIN}..."
+                      exit 1
+                  fi
+                  PACKAGE_DIR=$INSTALLATION_FOLDER/$CLUSTER
+                  pushd $PACKAGE_DIR
+                   echo '#!/usr/bin/expect -f
+                        set timeout -1
+                        spawn ./configure_aws_mesh7_adaptor.sh
+                        expect "Enter VPC id: "
+                        send -- "'"$VPCID"'\r"
+                        expect "Enter VPC region: "
+                        send -- "'"$KMAREGION"'\r"
+                        expect "Enter KMA Instance Profile Name(If you want to proceed with AccessKey press Enter): "
+                        send -- "'"$INSTANCE_PROFILE"'\r"
+                        expect "Enter ARN of the AWS NLB created on the subnet: (Leave blank if you are not using VPCMirroring Mode): "
+                        send -- "'"$NLB_ARN"'\r"
+                        expect eof' > expect_script.sh
+                    sudo expect expect_script.sh
+                    if [ $? -ne 0 ];then
+                        echo "KMA installation failed... Check if user has correct permissions to install packages and Access."
+                        [[ -n ${!TOPICARN} ]] && aws sns publish --topic-arn ${!TOPICARN} --message "KMA installation failed... Check if user has correct permissions to install packages and Access..."
+                        exit 1
+                    else
+                        echo "KMA installation Success...."
+                        [[ -n ${!TOPICARN} ]] && aws sns publish --topic-arn ${!TOPICARN} --message "KMA installation Success...."
+                    fi
+                    if [ -n "${!NLB_ARN}" ];then
+                         sudo apt update -y && sudo apt install nginx -y
+                    fi
+                  popd
+
+            - {
+               EMAIL:            !Ref Email,
+               ControllerDomain: !Ref ControllerURL,
+               Token:            !Ref ClusterAccessToken,
+               Cluster:          !Ref ClusterName,
+               Tenant:           !Ref TenantName,
+               NLBArn:           !If [ NLBCreationEnabled , !Ref Mesh7NLBVPCMirroring , "" ],
+               TopicArn:         !If [ CreateNotificationChannel , !Ref Mesh7NotificationTopic , "" ],
+              }
+
   Mesh7KMA:
     Type: AWS::EC2::Instance
+    Condition: ControllerPresent
     DependsOn:
       - PreInstallValidationResource
     Properties:
@@ -1586,6 +1779,12 @@ Outputs:
     Description: Mesh7 KMA PublicIP
     Value:
         !GetAtt [ Mesh7KMA, PublicIp ]
+    Condition: ControllerPresent
+  Mesh7AdaptorPublicIPAddress:
+    Description: Mesh7 Adaptor PublicIP
+    Value:
+        !GetAtt [ Mesh7Adaptor, PublicIp ]
+    Condition: AdaptorOnlyMode
   S3AccessCloudTrailBucketARN:
     Description: 'S3 Bucket ARN in which CloudTrail logs are stored'
     Value : !Join [ "", [ !Sub 'arn:aws:s3:::${TrailBucket}', '/*' ] ]
@@ -1601,3 +1800,4 @@ Outputs:
   Mesh7ControllerEKSClusterConfig:
     Description: 'Controller Cluster context - run from one of the owners provided in stack'
     Value:  !Sub "aws eks --region ${ControllerRegion} update-kubeconfig --name Mesh7Controller-${AWS::StackName}"
+    Condition: ControllerPresent
