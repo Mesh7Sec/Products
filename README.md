@@ -10,7 +10,7 @@
 **Mesh7 Cloud-Native Application Behavior Security for AWS**
 
 
-![Topology](documentation/images/topology.png)
+![Topology](aws-marketplace/documentation/images/topology.png)
 
 
 Mesh7 provides real-time Layer7 observability to AWS. Mesh7 provides brings contextualized security observability for applications running on AWS.
