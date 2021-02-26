@@ -37,16 +37,16 @@ Please send an email to Mesh7 Support at aws-support@mesh7.com to obtain Mesh7 L
 #### 2. Create CloudFormation Stack
 
 ######   a. Navigate to Stacks under CloudFormation Pane, and click on ‘Create Stack’
-![stack1](documentation/images/stack1.png)
+![stack1](aws-marketplace/documentation/images/stack1.png)
 ######   b. Upload controller-kma-install-cft.yaml template to create a CloudFormation Stack, and click ‘Next’.
-![stack2](documentation/images/stack2.png)
+![stack2](aws-marketplace/documentation/images/stack2.png)
 ######   c. Give the stack a name, and enter the requested input parameters
-![stack3](documentation/images/stack3.png)
-![stack4](documentation/images/stack4.png)
-![stack5](documentation/images/stack5.png)
+![stack3](aws-marketplace/documentation/images/stack3.png)
+![stack4](aws-marketplace/documentation/images/stack4.png)
+![stack5](aws-marketplace/documentation/images/stack5.png)
 
 ######   d. Agree to create an IAM user and resources, and Click ‘Create Stack’
-![stack6](documentation/images/stack6.png)
+![stack6](aws-marketplace/documentation/images/stack6.png)
 ######   e. Get installation data after Stack completes successfully
 
 ## Post Install
@@ -54,7 +54,7 @@ Please send an email to Mesh7 Support at aws-support@mesh7.com to obtain Mesh7 L
 #### Login to Mesh7 Controller
 
 ##### a. Get IP of Mesh7 Adaptor EC2 instance
-![stack7](documentation/images/stack7.png)
+![stack7](aws-marketplace/documentation/images/stack7.png)
 
 ##### b. Get domain name of Mesh7 Controller UI
 
