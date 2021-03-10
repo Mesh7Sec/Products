@@ -241,7 +241,7 @@ Mappings:
     ap-south-1:
       zones: "\"ap-south-1a\",\"ap-south-1b\""
     ap-northeast-1:
-      zones: "\"ap-northeast-1a\",\"ap-northeast-1b\""
+      zones: "\"ap-northeast-1a\",\"ap-northeast-1d\""
 
 Resources:
   DeleteVPCMirroringobjectsExecutionRole:
@@ -1442,7 +1442,7 @@ Resources:
       NetworkInterfaces:
         - NetworkInterfaceId: !Ref Mesh7AdapterInterface
           DeviceIndex: '0'
-      InstanceType: t2.xlarge
+      InstanceType: t2.2xlarge
       IamInstanceProfile: !Ref Mesh7KMAInstanceProfile
       Tags:
       - Key: Name
